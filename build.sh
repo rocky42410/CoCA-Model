@@ -68,7 +68,24 @@ case "${1:-all}" in
         build_target "Idle PoC" "apps/idle_poc.cpp" "build/idle_poc"
         echo -e "${GREEN}All targets built successfully!${NC}"
         ;;
+    # Add these cases to the build script:
+
+    batch)
+        build_target "Batch Evaluator" "apps/roca_batch_eval.cpp" "build/roca_batch_eval"
+        ;;
     
+    live)
+        build_target "Live Analyzer" "apps/roca_live_filtered.cpp" "build/roca_live"
+        ;;
+    
+    enhanced)
+        build_target "Enhanced Diagnostic" "apps/roca_diagnostic_enhanced.cpp" "build/roca_diagnostic_enhanced"
+        build_target "Filtered Trainer" "apps/idle_poc_filtered.cpp" "build/idle_poc_filtered"
+        build_target "Batch Evaluator" "apps/roca_batch_eval.cpp" "build/roca_batch_eval"
+        build_target "Live Analyzer" "apps/roca_live_filtered.cpp" "build/roca_live"
+        echo -e "${GREEN}All enhanced tools built!${NC}"
+        ;;
+        
     run-poc)
         # Build and run the PoC
         build_target "Idle PoC" "apps/idle_poc.cpp" "build/idle_poc"

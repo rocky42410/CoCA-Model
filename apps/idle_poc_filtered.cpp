@@ -378,34 +378,25 @@ int main(int argc, char** argv) {
 
 // ... training code ...
 
-// At the end of train_idle_model function:
-std::cout << "\nSaving trained model...\n";
-
-// Extract weights from your model
-std::vector<std::vector<float>> encoder_weights;
-std::vector<std::vector<float>> decoder_weights;
-
-// Get encoder weights (you need to expose these from your model)
-for (const auto& layer : model.encoder_layers) {
-    encoder_weights.push_back(layer.W.data);
-}
-
-// Get decoder weights
-for (const auto& layer : model.decoder_layers) {
-    decoder_weights.push_back(layer.W.data);
-}
-
-// Save complete model
-ModelSerializer::save_model(
-    "trained_model.roca",
-    processor.get_mean(),      // Training statistics
-    processor.get_std(),        // Training statistics
-    valid_indices,              // Which features are valid
-    encoder_weights,            // Trained encoder weights
-    decoder_weights,            // Trained decoder weights
-    model.Ce,                   // Center vector
-    model.anomaly_threshold     // Calibrated threshold
-);
+// After training completes, save the model
+    std::cout << "\n--- Saving Trained Model ---\n";
+    
+    std::string model_file = "trained_model.roca";
+    if (model.save_model(model_file)) {
+        std::cout << "✅ Model saved successfully to: " << model_file << "\n";
+        
+        // Also save the valid feature indices separately for reference
+        std::ofstream indices_file("model_features.txt");
+        indices_file << "# Feature indices used in trained model\n";
+        indices_file << "# Total: " << filter.get_dimension() << "\n";
+        for (size_t idx : filter.get_valid_indices()) {
+            indices_file << idx << "\n";
+        }
+        indices_file.close();
+        std::cout << "✅ Feature indices saved to: model_features.txt\n";
+    } else {
+        std::cerr << "❌ Failed to save model!\n";
+    }
     
     return 0;
 }

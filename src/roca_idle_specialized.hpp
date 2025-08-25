@@ -11,6 +11,7 @@
 #include <random>
 #include <iostream>
 #include <iomanip>
+#include <../src/model_io_complete.hpp>
 
 namespace roca_idle {
 
@@ -51,8 +52,26 @@ private:
     std::vector<float> feature_noise_floor;
     std::vector<bool> is_constant;
     size_t D;
+    std::vector<size_t> valid_indices; 
     
 public:
+
+// Add these methods to IdleFeatureProcessor class:
+public:
+    void set_stats(const std::vector<float>& mean, 
+                   const std::vector<float>& std,
+                   const std::vector<bool>& constant,
+                   const std::vector<size_t>& valid_idx) {
+        feature_mean = mean;
+        feature_std = std;
+        is_constant = constant;
+        valid_indices = valid_idx;
+        D = mean.size();
+    }
+    
+    const std::vector<size_t>& get_valid_indices() const { return valid_indices; }
+
+
     void compute_stats(const std::vector<std::vector<float>>& windows, 
                       size_t T, size_t feature_dim) {
         D = feature_dim;
@@ -372,6 +391,113 @@ private:
     std::vector<float> Ce;
     
 public:
+
+// Add these public methods to IdleRoCAModel class:
+    // Model persistence methods
+    bool save_model(const std::string& filepath) {
+        ModelMetadata metadata;
+        metadata.T = config.T;
+        metadata.D = config.D;
+        metadata.C = config.C;
+        metadata.K = config.K;
+        metadata.anomaly_threshold = anomaly_threshold;
+        metadata.num_valid_features = processor.get_valid_indices().size();
+        
+        // Collect encoder weights and biases
+        std::vector<std::vector<float>> encoder_weights = {
+            encoder1.W, encoder2.W, encoder3.W
+        };
+        std::vector<std::vector<float>> encoder_biases = {
+            encoder1.b, encoder2.b, encoder3.b
+        };
+        
+        // Collect decoder weights and biases
+        std::vector<std::vector<float>> decoder_weights = { decoder.W };
+        std::vector<std::vector<float>> decoder_biases = { decoder.b };
+        
+        return ModelSerializer::save_model(
+            filepath,
+            metadata,
+            processor.get_mean(),
+            processor.get_std(),
+            processor.get_constant_mask(),
+            processor.get_valid_indices(),
+            encoder_weights,
+            encoder_biases,
+            decoder_weights,
+            decoder_biases,
+            projector.W,
+            projector.b,
+            Ce
+        );
+    }
+    
+    bool load_model(const std::string& filepath) {
+        ModelMetadata metadata;
+        std::vector<float> feature_mean, feature_std;
+        std::vector<bool> is_constant;
+        std::vector<size_t> valid_indices;
+        std::vector<std::vector<float>> encoder_weights, encoder_biases;
+        std::vector<std::vector<float>> decoder_weights, decoder_biases;
+        std::vector<float> projector_weights, projector_bias;
+        std::vector<float> loaded_Ce;
+        
+        if (!ModelSerializer::load_model(
+                filepath,
+                metadata,
+                feature_mean,
+                feature_std,
+                is_constant,
+                valid_indices,
+                encoder_weights,
+                encoder_biases,
+                decoder_weights,
+                decoder_biases,
+                projector_weights,
+                projector_bias,
+                loaded_Ce)) {
+            return false;
+        }
+        
+        // Update config
+        config.T = metadata.T;
+        config.D = metadata.D;
+        config.C = metadata.C;
+        config.K = metadata.K;
+        anomaly_threshold = metadata.anomaly_threshold;
+        
+        // Recreate layers with correct dimensions
+        encoder1 = StableDenseLayer(config.T * config.D, 128, true, 0.1f);
+        encoder2 = StableDenseLayer(128, 64, true, 0.1f);
+        encoder3 = StableDenseLayer(64, config.C, false, 0.0f);
+        decoder = StableDenseLayer(config.C, config.T * config.D, false, 0.0f);
+        projector = StableDenseLayer(config.C, config.K, false, 0.0f);
+        
+        // Load weights
+        encoder1.W = encoder_weights[0];
+        encoder1.b = encoder_biases[0];
+        encoder2.W = encoder_weights[1];
+        encoder2.b = encoder_biases[1];
+        encoder3.W = encoder_weights[2];
+        encoder3.b = encoder_biases[2];
+        decoder.W = decoder_weights[0];
+        decoder.b = decoder_biases[0];
+        projector.W = projector_weights;
+        projector.b = projector_bias;
+        
+        // Load center
+        Ce = loaded_Ce;
+        
+        // Update processor
+        processor.set_stats(feature_mean, feature_std, is_constant, valid_indices);
+        
+        return true;
+    }
+    
+    const IdleRoCAConfig& get_config() const { return config; }
+    const std::vector<size_t>& get_valid_indices() const { 
+        return processor.get_valid_indices(); 
+    }
     float anomaly_threshold = 0.0f;
     
     IdleRoCAModel(const IdleRoCAConfig& cfg) 
