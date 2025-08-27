@@ -7,6 +7,8 @@
 #include <string>
 #include <iostream>
 #include <iomanip>
+#include <cstdint>
+#include <filesystem>
 
 namespace roca {
 
@@ -78,8 +80,14 @@ public:
         file.close();
         
         std::cout << "Model saved to: " << filepath << std::endl;
-        std::cout << "  File size: " << std::filesystem::file_size(filepath) / 1024 
-                  << " KB" << std::endl;
+        
+        // Check if filesystem is available for file size
+        try {
+            std::cout << "  File size: " << std::filesystem::file_size(filepath) / 1024 
+                      << " KB" << std::endl;
+        } catch(...) {
+            // Filesystem not available, skip size output
+        }
         
         return true;
     }

@@ -395,6 +395,7 @@ public:
 // Add these public methods to IdleRoCAModel class:
     // Model persistence methods
     bool save_model(const std::string& filepath) {
+        using namespace roca;
         ModelMetadata metadata;
         metadata.T = config.T;
         metadata.D = config.D;
@@ -433,6 +434,7 @@ public:
     }
     
     bool load_model(const std::string& filepath) {
+        using namespace roca;
         ModelMetadata metadata;
         std::vector<float> feature_mean, feature_std;
         std::vector<bool> is_constant;

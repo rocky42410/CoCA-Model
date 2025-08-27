@@ -769,3 +769,6 @@ void train_one_class_model(OneClassRoCA& model,
 }
 
 } // namespace roca
+
+// Include implementation
+#include "roca_one_class_impl.hpp"

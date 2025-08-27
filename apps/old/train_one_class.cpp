@@ -89,7 +89,9 @@ int main(int argc, char** argv) {
     WindowConfig window_cfg;
     window_cfg.T = 10;  // 10 frames per window
     window_cfg.stride = 5;
-    window_cfg.D = header.feature_count;
+    //window_cfg.D = header.feature_count;
+    window_cfg.D = 85;
+
     
     WindowMaker maker(window_cfg);
     AutoencoderFrame frame;
