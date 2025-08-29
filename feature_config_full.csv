@@ -1,0 +1,61 @@
+index,name,enabled,description
+0,accel_x_mean,1,Accelerometer X mean
+1,accel_x_std,1,Accelerometer X std dev
+2,accel_x_max,0,Accelerometer X max
+3,accel_y_mean,1,Accelerometer Y mean
+4,accel_y_std,1,Accelerometer Y std dev
+5,accel_y_max,0,Accelerometer Y max
+6,accel_z_mean,1,Accelerometer Z mean
+7,accel_z_std,1,Accelerometer Z std dev
+8,accel_z_max,0,Accelerometer Z max
+9,gyro_x_mean,1,Gyroscope X mean
+10,gyro_x_std,0,Gyroscope X std dev
+11,gyro_x_max,0,Gyroscope X max
+12,gyro_y_mean,1,Gyroscope Y mean
+13,gyro_y_std,0,Gyroscope Y std dev
+14,gyro_y_max,0,Gyroscope Y max
+15,gyro_z_mean,1,Gyroscope Z mean
+16,gyro_z_std,0,Gyroscope Z std dev
+17,gyro_z_max,0,Gyroscope Z max
+18,pos_x,1,Position X
+19,pos_y,1,Position Y
+20,pos_z,1,Position Z
+21,vel_x,1,Velocity X
+22,vel_y,1,Velocity Y
+23,vel_z,1,Velocity Z
+24,roll,1,Roll angle
+25,pitch,1,Pitch angle
+26,yaw,1,Yaw angle
+27,yaw_speed,1,Yaw angular velocity
+28,foot_force_0,1,Foot force FR
+29,foot_force_1,1,Foot force FL
+30,foot_force_2,1,Foot force RR
+31,foot_force_3,1,Foot force RL
+32,body_height,1,Body height
+33,mode,1,Robot mode
+34,gait_type,1,Gait type
+35,error_code,1,Error code
+36,power_v_mean,1,Voltage mean
+37,power_v_std,0,Voltage std dev
+38,power_a_mean,1,Current mean
+39,power_a_std,0,Current std dev
+40,motor_torque_0,1,Motor 0 torque
+41,motor_torque_1,1,Motor 1 torque
+42,motor_torque_2,1,Motor 2 torque
+52,motor_velocity_0,1,Motor 0 velocity
+53,motor_velocity_1,1,Motor 1 velocity
+54,motor_velocity_2,1,Motor 2 velocity
+64,motor_temp_0,1,Motor 0 temperature
+65,motor_temp_1,1,Motor 1 temperature
+66,motor_temp_2,1,Motor 2 temperature
+76,bit_flag,1,System bit flags
+77,uwb_distance,1,UWB distance estimate
+78,uwb_roll,1,UWB base roll
+79,uwb_pitch,1,UWB base pitch
+80,uwb_yaw,1,UWB base yaw
+81,range_front,1,LIDAR range front
+82,range_left,1,LIDAR range left
+83,range_right,1,LIDAR range right
+84,height_mean,1,Height map mean
+85,height_std,1,Height map std dev
+86,height_gradient,1,Height map gradient
