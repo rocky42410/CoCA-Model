@@ -7,12 +7,20 @@
 #include <algorithm>
 #include <numeric>
 #include <iomanip>
+#include <cstring>  // For strcmp
 
 #include "../src/coca_model.hpp"
 #include "../src/io/csv_reader.hpp"
 #include "../src/utils/model_io.hpp"
 
 using namespace coca;
+
+// Feature alignment modes
+enum class AlignmentMode {
+    ERROR,     // Hard fail on mismatch (default)
+    TRUNCATE,  // Truncate to model's feature count
+    PAD        // Pad with zeros to model's feature count
+};
 
 // ============================================================================
 // Test metrics computation
@@ -101,6 +109,53 @@ struct TestMetrics {
     }
 };
 
+// Align features to match model expectations
+std::vector<std::vector<float>> align_features(
+    const std::vector<std::vector<float>>& windows,
+    size_t csv_features,
+    size_t model_features,
+    AlignmentMode mode) {
+    
+    if (csv_features == model_features) {
+        return windows;  // No alignment needed
+    }
+    
+    std::vector<std::vector<float>> aligned_windows;
+    size_t window_size = windows[0].size() / csv_features;
+    
+    for (const auto& window : windows) {
+        std::vector<float> aligned_window;
+        
+        for (size_t t = 0; t < window_size; ++t) {
+            size_t offset = t * csv_features;
+            
+            if (mode == AlignmentMode::TRUNCATE) {
+                // Take first model_features from each timestep
+                for (size_t f = 0; f < std::min(csv_features, model_features); ++f) {
+                    aligned_window.push_back(window[offset + f]);
+                }
+                // Pad if necessary
+                for (size_t f = csv_features; f < model_features; ++f) {
+                    aligned_window.push_back(0.0f);
+                }
+            } else if (mode == AlignmentMode::PAD) {
+                // Copy all available features
+                for (size_t f = 0; f < std::min(csv_features, model_features); ++f) {
+                    aligned_window.push_back(window[offset + f]);
+                }
+                // Pad remaining with zeros
+                for (size_t f = csv_features; f < model_features; ++f) {
+                    aligned_window.push_back(0.0f);
+                }
+            }
+        }
+        
+        aligned_windows.push_back(aligned_window);
+    }
+    
+    return aligned_windows;
+}
+
 // ============================================================================
 // Main test application
 // ============================================================================
@@ -118,6 +173,7 @@ int main(int argc, char** argv) {
     bool skip_header = true;
     bool skip_timestamp = true;
     bool verbose = false;
+    AlignmentMode alignment_mode = AlignmentMode::ERROR;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -131,6 +187,19 @@ int main(int argc, char** argv) {
             window_size = std::stoi(argv[++i]);
         } else if (arg == "--stride" && i + 1 < argc) {
             window_stride = std::stoi(argv[++i]);
+        } else if (arg == "--align-features" && i + 1 < argc) {
+            std::string mode = argv[++i];
+            if (mode == "truncate") {
+                alignment_mode = AlignmentMode::TRUNCATE;
+            } else if (mode == "pad") {
+                alignment_mode = AlignmentMode::PAD;
+            } else if (mode == "error") {
+                alignment_mode = AlignmentMode::ERROR;
+            } else {
+                std::cerr << "Error: Invalid alignment mode: " << mode << "\n";
+                std::cerr << "Valid modes: error, truncate, pad\n";
+                return 1;
+            }
         } else if (arg == "--no-header") {
             skip_header = false;
         } else if (arg == "--no-timestamp") {
@@ -140,14 +209,18 @@ int main(int argc, char** argv) {
         } else if (arg == "--help") {
             std::cout << "Usage: " << argv[0] << " --csv <file> [options]\n";
             std::cout << "Options:\n";
-            std::cout << "  --csv <file>      Test CSV file (required)\n";
-            std::cout << "  --model <file>    Model file (default: trained_model.coca)\n";
-            std::cout << "  --labels <file>   True labels file (optional)\n";
-            std::cout << "  --window <size>   Window size (default: 10)\n";
-            std::cout << "  --stride <size>   Window stride (default: 5)\n";
-            std::cout << "  --no-header       CSV has no header row\n";
-            std::cout << "  --no-timestamp    Don't skip first column\n";
-            std::cout << "  --verbose         Show detailed results\n";
+            std::cout << "  --csv <file>         Test CSV file (required)\n";
+            std::cout << "  --model <file>       Model file (default: trained_model.coca)\n";
+            std::cout << "  --labels <file>      True labels file (optional)\n";
+            std::cout << "  --window <size>      Window size (default: 10)\n";
+            std::cout << "  --stride <size>      Window stride (default: 5)\n";
+            std::cout << "  --align-features <mode> Feature alignment mode:\n";
+            std::cout << "                       error: hard fail on mismatch (default)\n";
+            std::cout << "                       truncate: use first D features\n";
+            std::cout << "                       pad: pad with zeros to D features\n";
+            std::cout << "  --no-header          CSV has no header row\n";
+            std::cout << "  --no-timestamp       Don't skip first column\n";
+            std::cout << "  --verbose            Show detailed results\n";
             return 0;
         }
     }
@@ -171,7 +244,9 @@ int main(int argc, char** argv) {
     std::cout << "Model loaded:\n";
     std::cout << "  Window size: " << model.config.T << "\n";
     std::cout << "  Feature dim: " << model.config.D << "\n";
-    std::cout << "  Threshold: " << model.anomaly_threshold << "\n\n";
+    std::cout << "  Threshold: " << model.anomaly_threshold << "\n";
+    std::cout << "  Score mode: " << model.config.score_mix << "\n";
+    std::cout << "  Threshold mode: " << model.config.threshold_mode << "\n\n";
     
     // Override window size from model if not specified
     if (window_size == 10 && model.config.T != 10) {
@@ -190,21 +265,38 @@ int main(int argc, char** argv) {
         return 1;
     }
     
-    // Check feature count matches model
-    if (reader.get_feature_count() != model.config.D) {
-        std::cerr << "Warning: Feature count mismatch!\n";
-        std::cerr << "  Model expects: " << model.config.D << " features\n";
-        std::cerr << "  CSV has: " << reader.get_feature_count() << " features\n";
-        std::cerr << "Attempting to continue anyway...\n\n";
+    // Check feature count and handle mismatch
+    size_t csv_features = reader.get_feature_count();
+    size_t model_features = model.config.D;
+    
+    if (csv_features != model_features) {
+        std::cout << "\nFeature count mismatch detected!\n";
+        std::cout << "  CSV has: " << csv_features << " features\n";
+        std::cout << "  Model expects: " << model_features << " features\n";
+        
+        if (alignment_mode == AlignmentMode::ERROR) {
+            std::cerr << "\nError: Feature dimension mismatch!\n";
+            std::cerr << "Use --align-features <truncate|pad> to handle the mismatch\n";
+            return 1;
+        } else {
+            std::cout << "  Alignment mode: " 
+                     << (alignment_mode == AlignmentMode::TRUNCATE ? "truncate" : "pad") << "\n";
+        }
     }
     
     // Create test windows
-    std::cout << "Creating test windows...\n";
+    std::cout << "\nCreating test windows...\n";
     std::vector<std::vector<float>> test_windows = reader.get_windows(window_size, window_stride, verbose);
     
     if (test_windows.empty()) {
         std::cerr << "Error: No test windows created\n";
         return 1;
+    }
+    
+    // Align features if needed
+    if (csv_features != model_features && alignment_mode != AlignmentMode::ERROR) {
+        std::cout << "Aligning features from " << csv_features << " to " << model_features << "...\n";
+        test_windows = align_features(test_windows, csv_features, model_features, alignment_mode);
     }
     
     std::cout << "Created " << test_windows.size() << " test windows\n\n";
@@ -339,4 +431,3 @@ int main(int argc, char** argv) {
     
     return 0;
 }
-

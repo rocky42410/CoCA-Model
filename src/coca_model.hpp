@@ -1,6 +1,7 @@
 // ============================================================================
 // COCA (Competitive One-Class Anomaly) Model Implementation
 // Clean implementation without contamination handling
+// With critical fixes for serialization and variance computation
 // ============================================================================
 
 #pragma once
@@ -161,6 +162,24 @@ public:
     const std::vector<float>& get_std() const { return feature_std; }
     const std::vector<bool>& get_constant_mask() const { return is_constant; }
     const std::vector<size_t>& get_constant_indices() const { return constant_indices; }
+    
+    // Method to restore statistics from saved model
+    void set_stats(const std::vector<float>& mean, 
+                   const std::vector<float>& std,
+                   const std::vector<bool>& const_mask) {
+        feature_mean = mean;
+        feature_std = std;
+        is_constant = const_mask;
+        D = mean.size();
+        
+        // Rebuild constant indices
+        constant_indices.clear();
+        for (size_t i = 0; i < is_constant.size(); ++i) {
+            if (is_constant[i]) {
+                constant_indices.push_back(i);
+            }
+        }
+    }
 };
 
 // ============================================================================
@@ -453,9 +472,12 @@ public:
                 size_t idx = b * config.T * config.D + i;
                 float diff = x[idx] - fwd.x_hat[idx];
                 
-                // Weight by feature importance
-                size_t feature_idx = i % config.D;
-                float weight = constant_mask[feature_idx] ? 0.1f : 1.0f;
+                // Weight by feature importance (only if we have mask info)
+                float weight = 1.0f;
+                if (!constant_mask.empty() && (i % config.D) < constant_mask.size()) {
+                    size_t feature_idx = i % config.D;
+                    weight = constant_mask[feature_idx] ? 0.1f : 1.0f;
+                }
                 
                 fwd.rec_loss += weight * diff * diff;
             }
@@ -477,8 +499,9 @@ public:
         // Variance loss with stability fix
         fwd.var_loss = 0.0f;
         
-        // Skip variance loss for batch_size < 2
+        // CRITICAL FIX: Skip variance loss for batch_size < 2 (degenerate case)
         if (batch_size < 2) {
+            // Can't compute meaningful variance with single sample
             fwd.var_loss = 0.0f;
             return;
         }
@@ -692,13 +715,19 @@ void train_coca_model(COCAModel& model,
             std::vector<float> batch;
             size_t batch_start = batch_idx * config.batch_size;
             size_t batch_end = std::min(batch_start + config.batch_size, train_indices.size());
+            size_t actual_batch_size = batch_end - batch_start;
+            
+            // CRITICAL: Only process batches with at least 2 samples for variance
+            if (actual_batch_size < 2 && batch_idx > 0) {
+                continue; // Skip single-sample batches except the first
+            }
             
             for (size_t i = batch_start; i < batch_end; ++i) {
                 auto normalized = model.processor.normalize(windows[train_indices[i]], config.T);
                 batch.insert(batch.end(), normalized.begin(), normalized.end());
             }
             
-            // Pad batch if necessary
+            // Pad batch if necessary (but ensure at least 2 samples)
             while (batch.size() < config.batch_size * config.T * config.D) {
                 auto normalized = model.processor.normalize(windows[train_indices[0]], config.T);
                 batch.insert(batch.end(), normalized.begin(), normalized.end());

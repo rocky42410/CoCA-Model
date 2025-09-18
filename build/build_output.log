@@ -1,16 +1,16 @@
-[ 37%] Building CXX object CMakeFiles/coca_synthetic.dir/apps/coca_synthetic.cpp.o
-[ 37%] Building CXX object CMakeFiles/coca_unit_tests.dir/tests/test_losses.cpp.o
-[ 37%] Building CXX object CMakeFiles/coca_test.dir/apps/coca_test.cpp.o
+[ 50%] Building CXX object CMakeFiles/coca_synthetic.dir/apps/coca_synthetic.cpp.o
+[ 50%] Building CXX object CMakeFiles/coca_test.dir/apps/coca_test.cpp.o
+[ 50%] Building CXX object CMakeFiles/coca_unit_tests.dir/tests/test_losses.cpp.o
 [ 50%] Building CXX object CMakeFiles/coca_train.dir/apps/coca_train.cpp.o
 /mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4/tests/test_losses.cpp: In function ‘void test_variance_loss()’:
 /mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4/tests/test_losses.cpp:153:15: warning: unused variable ‘mean’ [-Wunused-variable]
   153 |         float mean = 0.5f;  // All values are 0.5
       |               ^~~~
 [ 62%] Linking CXX executable coca_unit_tests
-[ 75%] Linking CXX executable coca_train
-[ 87%] Linking CXX executable coca_synthetic
+[ 62%] Built target coca_unit_tests
+[ 75%] Linking CXX executable coca_synthetic
+[ 87%] Linking CXX executable coca_train
 [100%] Linking CXX executable coca_test
-[100%] Built target coca_unit_tests
-[100%] Built target coca_train
 [100%] Built target coca_synthetic
+[100%] Built target coca_train
 [100%] Built target coca_test

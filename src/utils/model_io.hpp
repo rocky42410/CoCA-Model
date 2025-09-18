@@ -5,6 +5,7 @@
 #include <fstream>
 #include <vector>
 #include <string>
+#include <algorithm>
 #include "../coca_model.hpp"
 
 namespace coca {
@@ -72,36 +73,37 @@ public:
         file.read(reinterpret_cast<char*>(&version), sizeof(version));
         
         if (magic != 0x434F4341 || version != 1) {
+            std::cerr << "Error: Invalid model file format (magic: " << std::hex << magic 
+                      << ", version: " << version << ")\n";
             return false;
         }
         
         // Read configuration
         COCAConfig config;
         read_config(file, config);
+        
+        // Normalize config strings after loading
+        normalize_config_strings(config);
+        
         model = COCAModel(config);
         
-        // Read processor statistics
+        // Read processor statistics and restore them
         std::vector<float> mean, std_dev;
         std::vector<bool> const_mask;
         read_vector(file, mean);
         read_vector(file, std_dev);
         read_bool_vector(file, const_mask);
-        // Note: Would need setter methods in processor
+        
+        // CRITICAL: Restore the processor statistics
+        model.processor.set_stats(mean, std_dev, const_mask);
         
         // Read encoder layers
         size_t num_encoder;
         file.read(reinterpret_cast<char*>(&num_encoder), sizeof(num_encoder));
         model.encoder_layers.clear();
         for (size_t i = 0; i < num_encoder; ++i) {
-            size_t in_dim, out_dim;
-            bool use_relu;
-            float dropout;
-            file.read(reinterpret_cast<char*>(&in_dim), sizeof(in_dim));
-            file.read(reinterpret_cast<char*>(&out_dim), sizeof(out_dim));
-            file.read(reinterpret_cast<char*>(&use_relu), sizeof(use_relu));
-            file.read(reinterpret_cast<char*>(&dropout), sizeof(dropout));
-            
-            DenseLayer layer(in_dim, out_dim, use_relu, dropout);
+            // Create dummy layer just for reading
+            DenseLayer layer(1, 1);
             read_layer(file, layer);
             model.encoder_layers.push_back(layer);
         }
@@ -111,15 +113,8 @@ public:
         file.read(reinterpret_cast<char*>(&num_decoder), sizeof(num_decoder));
         model.decoder_layers.clear();
         for (size_t i = 0; i < num_decoder; ++i) {
-            size_t in_dim, out_dim;
-            bool use_relu;
-            float dropout;
-            file.read(reinterpret_cast<char*>(&in_dim), sizeof(in_dim));
-            file.read(reinterpret_cast<char*>(&out_dim), sizeof(out_dim));
-            file.read(reinterpret_cast<char*>(&use_relu), sizeof(use_relu));
-            file.read(reinterpret_cast<char*>(&dropout), sizeof(dropout));
-            
-            DenseLayer layer(in_dim, out_dim, use_relu, dropout);
+            // Create dummy layer just for reading
+            DenseLayer layer(1, 1);
             read_layer(file, layer);
             model.decoder_layers.push_back(layer);
         }
@@ -138,6 +133,31 @@ public:
     }
     
 private:
+    // Normalize config strings by removing inline comments and trimming
+    static void normalize_config_strings(COCAConfig& config) {
+        auto strip_inline_comment = [](std::string& s) {
+            // Remove everything after '#'
+            if (auto p = s.find('#'); p != std::string::npos) s.erase(p);
+            // Trim spaces/tabs
+            auto l = s.find_first_not_of(" \t\r\n");
+            auto r = s.find_last_not_of(" \t\r\n");
+            s = (l == std::string::npos) ? "" : s.substr(l, r - l + 1);
+        };
+        
+        strip_inline_comment(config.score_mix);
+        strip_inline_comment(config.threshold_mode);
+        
+        // Canonicalize values
+        if (config.score_mix != "inv_only" && config.score_mix != "inv_plus_rec") {
+            std::cerr << "Warning: Invalid score_mix '" << config.score_mix << "', defaulting to 'inv_only'\n";
+            config.score_mix = "inv_only";
+        }
+        if (config.threshold_mode != "quantile" && config.threshold_mode != "zscore") {
+            std::cerr << "Warning: Invalid threshold_mode '" << config.threshold_mode << "', defaulting to 'quantile'\n";
+            config.threshold_mode = "quantile";
+        }
+    }
+    
     static void write_config(std::ofstream& file, const COCAConfig& config) {
         file.write(reinterpret_cast<const char*>(&config.T), sizeof(config.T));
         file.write(reinterpret_cast<const char*>(&config.D), sizeof(config.D));
@@ -231,7 +251,15 @@ private:
         write_vector(file, layer.vb);
     }
     
+    // CRITICAL FIX: read_layer must match write_layer exactly!
     static void read_layer(std::ifstream& file, DenseLayer& layer) {
+        // First read the header fields (THIS WAS MISSING!)
+        file.read(reinterpret_cast<char*>(&layer.in_dim), sizeof(layer.in_dim));
+        file.read(reinterpret_cast<char*>(&layer.out_dim), sizeof(layer.out_dim));
+        file.read(reinterpret_cast<char*>(&layer.use_relu), sizeof(layer.use_relu));
+        file.read(reinterpret_cast<char*>(&layer.dropout_rate), sizeof(layer.dropout_rate));
+        
+        // Then read the vectors
         read_vector(file, layer.W);
         read_vector(file, layer.b);
         
