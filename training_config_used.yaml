@@ -1,0 +1,40 @@
+# COCA Configuration
+# Model architecture
+T: 10
+D: 1
+C: 32
+K: 16
+
+# Loss weights
+lambda_inv: 1
+lambda_var: 1
+lambda_rec: 0.1
+
+# Variance parameters
+zeta: 1
+variance_epsilon: 0.0001
+
+# Center parameters
+center_warmup_epochs: 8
+inv_ramp_epochs: 20
+
+# Training parameters
+learning_rate: 0.0005
+batch_size: 32
+epochs: 50
+val_split: 0.2
+
+# Score and threshold
+score_mix: inv_only         # Options: inv_only, inv_plus_rec
+threshold_mode: quantile    # Options: quantile, zscore
+threshold_quantile: 0.995
+threshold_zscore_k: 3
+
+# Misc
+min_std: 0.0001
+dropout_rate: 0.1
+seed: 42
+
+# Early stopping
+early_stop_patience: 10
+early_stop_min_delta: 1e-06

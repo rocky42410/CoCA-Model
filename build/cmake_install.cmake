@@ -1,4 +1,4 @@
-# Install script for directory: /mnt/c/Users/rocks/Downloads/CoCA-Model-v4
+# Install script for directory: /mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -49,7 +49,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/coca_train"
          RPATH "")
   endif()
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE EXECUTABLE FILES "/mnt/c/Users/rocks/Downloads/CoCA-Model-v4/build/coca_train")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE EXECUTABLE FILES "/mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4/build/coca_train")
   if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/coca_train" AND
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/coca_train")
     if(CMAKE_INSTALL_DO_STRIP)
@@ -59,7 +59,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
-  include("/mnt/c/Users/rocks/Downloads/CoCA-Model-v4/build/CMakeFiles/coca_train.dir/install-cxx-module-bmi-Release.cmake" OPTIONAL)
+  include("/mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4/build/CMakeFiles/coca_train.dir/install-cxx-module-bmi-Release.cmake" OPTIONAL)
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
@@ -69,7 +69,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
          FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/coca_test"
          RPATH "")
   endif()
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE EXECUTABLE FILES "/mnt/c/Users/rocks/Downloads/CoCA-Model-v4/build/coca_test")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE EXECUTABLE FILES "/mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4/build/coca_test")
   if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/coca_test" AND
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/coca_test")
     if(CMAKE_INSTALL_DO_STRIP)
@@ -79,20 +79,20 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
-  include("/mnt/c/Users/rocks/Downloads/CoCA-Model-v4/build/CMakeFiles/coca_test.dir/install-cxx-module-bmi-Release.cmake" OPTIONAL)
+  include("/mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4/build/CMakeFiles/coca_test.dir/install-cxx-module-bmi-Release.cmake" OPTIONAL)
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/etc/coca" TYPE FILE FILES "/mnt/c/Users/rocks/Downloads/CoCA-Model-v4/coca_config.yaml")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/etc/coca" TYPE FILE FILES "/mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4/coca_config.yaml")
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
   file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include/coca" TYPE FILE FILES
-    "/mnt/c/Users/rocks/Downloads/CoCA-Model-v4/src/coca_model.hpp"
-    "/mnt/c/Users/rocks/Downloads/CoCA-Model-v4/src/io/binary_log.hpp"
-    "/mnt/c/Users/rocks/Downloads/CoCA-Model-v4/src/data/window_maker.hpp"
-    "/mnt/c/Users/rocks/Downloads/CoCA-Model-v4/src/utils/config_parser.hpp"
-    "/mnt/c/Users/rocks/Downloads/CoCA-Model-v4/src/utils/model_io.hpp"
+    "/mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4/src/coca_model.hpp"
+    "/mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4/src/io/binary_log.hpp"
+    "/mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4/src/data/window_maker.hpp"
+    "/mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4/src/utils/config_parser.hpp"
+    "/mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4/src/utils/model_io.hpp"
     )
 endif()
 
@@ -104,5 +104,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "/mnt/c/Users/rocks/Downloads/CoCA-Model-v4/build/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "/mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
