@@ -1,5 +1,5 @@
 // ============================================================================
-// apps/coca_test.cpp - Test trained COCA model on new data
+// apps/coca_test.cpp - Test trained COCA model on CSV data
 // ============================================================================
 #include <iostream>
 #include <fstream>
@@ -9,12 +9,10 @@
 #include <iomanip>
 
 #include "../src/coca_model.hpp"
-#include "../src/io/binary_log.hpp"
-#include "../src/data/window_maker.hpp"
+#include "../src/io/csv_reader.hpp"
 #include "../src/utils/model_io.hpp"
 
 using namespace coca;
-using namespace roca;
 
 // ============================================================================
 // Test metrics computation
@@ -115,31 +113,47 @@ int main(int argc, char** argv) {
     std::string model_file = "trained_model.coca";
     std::string test_file = "";
     std::string label_file = "";  // Optional: file with true labels
+    size_t window_size = 10;
+    size_t window_stride = 5;
+    bool skip_header = true;
+    bool skip_timestamp = true;
     bool verbose = false;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--model" && i + 1 < argc) {
             model_file = argv[++i];
-        } else if (arg == "--test" && i + 1 < argc) {
+        } else if ((arg == "--test" || arg == "--csv") && i + 1 < argc) {
             test_file = argv[++i];
         } else if (arg == "--labels" && i + 1 < argc) {
             label_file = argv[++i];
+        } else if (arg == "--window" && i + 1 < argc) {
+            window_size = std::stoi(argv[++i]);
+        } else if (arg == "--stride" && i + 1 < argc) {
+            window_stride = std::stoi(argv[++i]);
+        } else if (arg == "--no-header") {
+            skip_header = false;
+        } else if (arg == "--no-timestamp") {
+            skip_timestamp = false;
         } else if (arg == "--verbose") {
             verbose = true;
         } else if (arg == "--help") {
-            std::cout << "Usage: " << argv[0] << " --test <file> [options]\n";
+            std::cout << "Usage: " << argv[0] << " --csv <file> [options]\n";
             std::cout << "Options:\n";
-            std::cout << "  --test <file>    Test data file (required)\n";
-            std::cout << "  --model <file>   Model file (default: trained_model.coca)\n";
-            std::cout << "  --labels <file>  True labels file (optional)\n";
-            std::cout << "  --verbose        Show detailed results\n";
+            std::cout << "  --csv <file>      Test CSV file (required)\n";
+            std::cout << "  --model <file>    Model file (default: trained_model.coca)\n";
+            std::cout << "  --labels <file>   True labels file (optional)\n";
+            std::cout << "  --window <size>   Window size (default: 10)\n";
+            std::cout << "  --stride <size>   Window stride (default: 5)\n";
+            std::cout << "  --no-header       CSV has no header row\n";
+            std::cout << "  --no-timestamp    Don't skip first column\n";
+            std::cout << "  --verbose         Show detailed results\n";
             return 0;
         }
     }
     
     if (test_file.empty()) {
-        std::cerr << "Error: Please specify test data with --test\n";
+        std::cerr << "Error: Please specify test data with --csv or --test\n";
         return 1;
     }
     
@@ -147,7 +161,6 @@ int main(int argc, char** argv) {
     std::cout << "Loading model from: " << model_file << "\n";
     
     COCAConfig config;
-    config.D = 256;  // Will be updated from model
     COCAModel model(config);
     
     if (!ModelIO::load_model(model, model_file)) {
@@ -160,49 +173,38 @@ int main(int argc, char** argv) {
     std::cout << "  Feature dim: " << model.config.D << "\n";
     std::cout << "  Threshold: " << model.anomaly_threshold << "\n\n";
     
-    // Load test data
+    // Override window size from model if not specified
+    if (window_size == 10 && model.config.T != 10) {
+        window_size = model.config.T;
+        std::cout << "Using model's window size: " << window_size << "\n";
+    }
+    
+    // Load test data from CSV
     std::cout << "Loading test data from: " << test_file << "\n";
+    std::cout << "  Skip header: " << (skip_header ? "yes" : "no") << "\n";
+    std::cout << "  Skip timestamp: " << (skip_timestamp ? "yes" : "no") << "\n\n";
     
-    std::ifstream file(test_file, std::ios::binary);
-    if (!file) {
-        std::cerr << "Error: Cannot open test file\n";
+    CSVReader reader;
+    if (!reader.load(test_file, skip_header, skip_timestamp, verbose)) {
+        std::cerr << "Error: Failed to load test CSV file\n";
         return 1;
     }
     
-    BinaryFileHeader header;
-    if (!read_header(file, header)) {
-        std::cerr << "Error: Invalid header\n";
+    // Check feature count matches model
+    if (reader.get_feature_count() != model.config.D) {
+        std::cerr << "Warning: Feature count mismatch!\n";
+        std::cerr << "  Model expects: " << model.config.D << " features\n";
+        std::cerr << "  CSV has: " << reader.get_feature_count() << " features\n";
+        std::cerr << "Attempting to continue anyway...\n\n";
+    }
+    
+    // Create test windows
+    std::cout << "Creating test windows...\n";
+    std::vector<std::vector<float>> test_windows = reader.get_windows(window_size, window_stride, verbose);
+    
+    if (test_windows.empty()) {
+        std::cerr << "Error: No test windows created\n";
         return 1;
-    }
-    
-    // Load frames
-    std::vector<std::vector<float>> test_frames;
-    AutoencoderFrame frame;
-    
-    while (read_frame(file, frame)) {
-        std::vector<float> features(header.feature_count);
-        for (size_t i = 0; i < header.feature_count; ++i) {
-            features[i] = frame.features[i];
-        }
-        test_frames.push_back(features);
-    }
-    
-    std::cout << "Loaded " << test_frames.size() << " test frames\n";
-    
-    // Create windows
-    WindowConfig window_cfg;
-    window_cfg.T = model.config.T;
-    window_cfg.stride = 5;
-    window_cfg.D = header.feature_count;
-    
-    WindowMaker maker(window_cfg);
-    std::vector<std::vector<float>> test_windows;
-    
-    for (const auto& frame_data : test_frames) {
-        maker.push(frame_data);
-        if (maker.ready()) {
-            test_windows.push_back(maker.get_window());
-        }
     }
     
     std::cout << "Created " << test_windows.size() << " test windows\n\n";
@@ -315,5 +317,26 @@ int main(int argc, char** argv) {
         }
     }
     
+    // Save results to CSV
+    std::ofstream results("test_results.csv");
+    results << "window_index,score,detected_anomaly";
+    if (!true_labels.empty()) {
+        results << ",true_label,correct";
+    }
+    results << "\n";
+    
+    for (size_t i = 0; i < all_scores.size(); ++i) {
+        results << i << "," << all_scores[i] << "," << (all_scores[i] > model.anomaly_threshold ? 1 : 0);
+        if (i < true_labels.size()) {
+            bool is_correct = (all_scores[i] > model.anomaly_threshold) == true_labels[i];
+            results << "," << true_labels[i] << "," << is_correct;
+        }
+        results << "\n";
+    }
+    results.close();
+    
+    std::cout << "\nResults saved to: test_results.csv\n";
+    
     return 0;
 }
+

@@ -1,8 +1,0 @@
-# Training configuration for filtered model
-original_features: 256
-filtered_features: 83
-window_size: 10
-latent_dim: 32
-projection_dim: 16
-training_windows: 17996
-anomaly_threshold: 2.59
