@@ -1,0 +1,1 @@
+/usr/bin/c++  -fopenmp -O3 -DNDEBUG CMakeFiles/coca_synthetic.dir/apps/coca_synthetic.cpp.o -o coca_synthetic  /usr/lib/gcc/x86_64-linux-gnu/13/libgomp.so /usr/lib/x86_64-linux-gnu/libpthread.a 
