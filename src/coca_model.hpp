@@ -1,6 +1,6 @@
 // ============================================================================
-// COCA (Competitive One-Class Anomaly) Model Implementation - FIXED VERSION
-// Fixes state accumulation bug that causes monotonically increasing scores
+// COCA Model - COMPREHENSIVE FIX FOR STATE ACCUMULATION BUG
+// Version 2.0 - Addresses ALL sources of state accumulation
 // ============================================================================
 
 #pragma once
@@ -16,9 +16,6 @@
 
 namespace coca {
 
-// ============================================================================
-// COCA Configuration (unchanged)
-// ============================================================================
 struct COCAConfig {
     // Model architecture
     size_t T = 10;          // Window size
@@ -29,7 +26,7 @@ struct COCAConfig {
     // Loss weights
     float lambda_inv = 1.0f;     // Invariance weight
     float lambda_var = 1.0f;     // Variance weight
-    float lambda_rec = 0.1f;     // Reconstruction weight (0 for pure COCA)
+    float lambda_rec = 0.1f;     // Reconstruction weight
     
     // Variance parameters
     float zeta = 1.0f;              // Target std for variance loss
@@ -47,7 +44,7 @@ struct COCAConfig {
     
     // Score and threshold
     std::string score_mix = "inv_only";  // "inv_only" or "inv_plus_rec"
-    std::string threshold_mode = "quantile";  // "zscore" or "quantile"
+    std::string threshold_mode = "quantile";  // "quantile" or "zscore"
     float threshold_quantile = 0.995f;
     float threshold_zscore_k = 3.0f;
     
@@ -62,7 +59,7 @@ struct COCAConfig {
 };
 
 // ============================================================================
-// Feature Processor - FIXED to be truly stateless
+// Feature Processor - STATELESS
 // ============================================================================
 class FeatureProcessor {
 private:
@@ -133,22 +130,24 @@ public:
         std::cout << "  Variable features: " << (D - constant_indices.size()) << "\n";
     }
     
-    // CRITICAL FIX: Make normalize truly const and stateless
+    // CRITICAL: Make normalize truly const and create new vector
     std::vector<float> normalize(const std::vector<float>& window, size_t T) const {
-        std::vector<float> normalized = window;
+        std::vector<float> normalized(window.size());  // Create fresh vector
         
         for (size_t t = 0; t < T; ++t) {
             for (size_t d = 0; d < D; ++d) {
                 size_t idx = t * D + d;
                 
+                float val = window[idx];
+                
                 // Handle NaN/Inf
-                if (std::isnan(normalized[idx]) || std::isinf(normalized[idx])) {
+                if (std::isnan(val) || std::isinf(val)) {
                     normalized[idx] = 0.0f;
                     continue;
                 }
                 
                 // Standardize
-                normalized[idx] = (normalized[idx] - feature_mean[d]) / feature_std[d];
+                normalized[idx] = (val - feature_mean[d]) / feature_std[d];
                 
                 // Clip extreme values
                 normalized[idx] = std::max(-5.0f, std::min(5.0f, normalized[idx]));
@@ -163,7 +162,6 @@ public:
     const std::vector<bool>& get_constant_mask() const { return is_constant; }
     const std::vector<size_t>& get_constant_indices() const { return constant_indices; }
     
-    // Method to restore statistics from saved model
     void set_stats(const std::vector<float>& mean, 
                    const std::vector<float>& std,
                    const std::vector<bool>& const_mask) {
@@ -172,7 +170,6 @@ public:
         is_constant = const_mask;
         D = mean.size();
         
-        // Rebuild constant indices
         constant_indices.clear();
         for (size_t i = 0; i < is_constant.size(); ++i) {
             if (is_constant[i]) {
@@ -183,7 +180,7 @@ public:
 };
 
 // ============================================================================
-// Dense Layer - FIXED to properly handle inference vs training
+// Dense Layer - COMPLETELY STATELESS FOR INFERENCE
 // ============================================================================
 class DenseLayer {
 public:
@@ -195,7 +192,7 @@ public:
     bool use_relu;
     float dropout_rate;
     
-    // Cache for backward pass - ONLY used during training
+    // CRITICAL: These are ONLY for training
     std::vector<float> x_cache, z_cache, a_cache;
     std::vector<bool> dropout_mask;
     
@@ -224,14 +221,44 @@ public:
         std::fill(b.begin(), b.end(), 0.01f);
     }
     
-    // CRITICAL FIX: Clear caches before each forward pass to prevent state accumulation
-    std::vector<float> forward(const std::vector<float>& x, bool training, std::mt19937& rng) {
+    // CRITICAL FIX: Completely separate inference path
+    std::vector<float> forward_inference(const std::vector<float>& x) const {
+        // NEVER cache anything during inference
         size_t batch_size = x.size() / in_dim;
         
-        // CRITICAL: Only cache during training
-        if (training) {
-            x_cache = x;
+        // Create fresh output vector
+        std::vector<float> z(batch_size * out_dim, 0.0f);
+        
+        // Linear transformation: z = x @ W + b
+        for (size_t b_idx = 0; b_idx < batch_size; ++b_idx) {
+            for (size_t i = 0; i < in_dim; ++i) {
+                for (size_t j = 0; j < out_dim; ++j) {
+                    z[b_idx * out_dim + j] += 
+                        x[b_idx * in_dim + i] * W[i * out_dim + j];
+                }
+            }
+            for (size_t j = 0; j < out_dim; ++j) {
+                z[b_idx * out_dim + j] += b[j];
+            }
         }
+        
+        // Apply activation
+        if (use_relu) {
+            for (auto& val : z) {
+                val = std::max(0.0f, val);
+            }
+        }
+        
+        // NO dropout during inference
+        return z;
+    }
+    
+    // Training-only forward pass
+    std::vector<float> forward_training(const std::vector<float>& x, std::mt19937& rng) {
+        size_t batch_size = x.size() / in_dim;
+        
+        // Cache for backprop
+        x_cache = x;
         
         // Linear: z = x @ W + b
         std::vector<float> z(batch_size * out_dim, 0.0f);
@@ -248,10 +275,7 @@ public:
             }
         }
         
-        // Store z only during training
-        if (training) {
-            z_cache = z;
-        }
+        z_cache = z;
         
         // Activation
         std::vector<float> a = z;
@@ -261,13 +285,10 @@ public:
             }
         }
         
-        // Store activated values only during training
-        if (training) {
-            a_cache = a;
-        }
+        a_cache = a;
         
-        // Dropout (only during training)
-        if (training && dropout_rate > 0.0f) {
+        // Dropout (training only)
+        if (dropout_rate > 0.0f) {
             dropout_mask.resize(a.size());
             std::uniform_real_distribution<float> dist(0.0f, 1.0f);
             
@@ -279,13 +300,12 @@ public:
                     a[i] /= (1.0f - dropout_rate);
                 }
             }
-        } else {
-            // CRITICAL: Clear dropout mask during inference
-            dropout_mask.clear();
         }
         
         return a;
     }
+    
+    // REMOVED old forward() method - use explicit training/inference versions
     
     std::vector<float> backward(const std::vector<float>& grad_output) {
         size_t batch_size = grad_output.size() / out_dim;
@@ -369,7 +389,6 @@ public:
         }
     }
     
-    // CRITICAL NEW METHOD: Clear all caches
     void clear_caches() {
         x_cache.clear();
         z_cache.clear();
@@ -379,7 +398,7 @@ public:
 };
 
 // ============================================================================
-// COCA Model - FIXED to prevent state accumulation
+// COCA Model - COMPREHENSIVE FIX
 // ============================================================================
 class COCAModel {
 public:
@@ -393,6 +412,7 @@ public:
     
     // One-class center - FROZEN after training
     std::vector<float> Ce;
+    std::vector<float> Ce_frozen;  // CRITICAL: Frozen copy for inference
     
     // Anomaly detection
     float anomaly_threshold = 0.0f;
@@ -404,8 +424,8 @@ public:
     std::vector<float> train_losses;
     std::vector<float> val_losses;
     
-    // Training state flag
-    bool is_training = false;
+    // CRITICAL: Training mode flag
+    bool is_training_mode = false;
     
     COCAModel(const COCAConfig& cfg) 
         : config(cfg), 
@@ -430,6 +450,9 @@ public:
         }
         norm = std::sqrt(norm);
         for (auto& c : Ce) c /= norm;
+        
+        // Initialize frozen copy
+        Ce_frozen = Ce;
     }
     
     void init_weights() {
@@ -453,49 +476,72 @@ public:
         float var_loss = 0.0f;
     };
     
-    // CRITICAL FIX: Clear all layer caches before forward pass
-    void clear_all_caches() {
-        for (auto& layer : encoder_layers) {
-            layer.clear_caches();
-        }
-        for (auto& layer : decoder_layers) {
-            layer.clear_caches();
-        }
-        projector.clear_caches();
-    }
-    
-    ForwardResult forward(const std::vector<float>& x, bool training = true) {
+    // CRITICAL: Completely separate inference forward pass
+    ForwardResult forward_inference(const std::vector<float>& x) {
         ForwardResult result;
         
-        // CRITICAL: Clear caches for inference to prevent state accumulation
-        if (!training) {
-            clear_all_caches();
-        }
-        
-        // Encode: x -> z
+        // CRITICAL: Use inference-specific path with NO caching
         std::vector<float> h = x;
-        for (auto& layer : encoder_layers) {
-            h = layer.forward(h, training, rng);
+        
+        // Encode: x -> z (inference mode)
+        for (const auto& layer : encoder_layers) {
+            h = layer.forward_inference(h);
         }
         result.z = h;
         
-        // Decode: z -> x̂
+        // Decode: z -> x̂ (inference mode)
         h = result.z;
-        for (auto& layer : decoder_layers) {
-            h = layer.forward(h, training, rng);
+        for (const auto& layer : decoder_layers) {
+            h = layer.forward_inference(h);
         }
         result.x_hat = h;
         
-        // Re-encode: x̂ -> z′ (NEVER use dropout for consistency)
+        // Re-encode: x̂ -> z′ (inference mode)
         h = result.x_hat;
-        for (auto& layer : encoder_layers) {
-            h = layer.forward(h, false, rng);  // ALWAYS false for re-encoding
+        for (const auto& layer : encoder_layers) {
+            h = layer.forward_inference(h);
         }
         result.z_prime = h;
         
-        // Project and normalize: z -> q, z′ -> q′
-        result.q = projector.forward(result.z, false, rng);
-        result.q_prime = projector.forward(result.z_prime, false, rng);
+        // Project and normalize: z -> q, z′ -> q′ (inference mode)
+        result.q = projector.forward_inference(result.z);
+        result.q_prime = projector.forward_inference(result.z_prime);
+        
+        // L2 normalize projections
+        l2_normalize_batch(result.q, config.K);
+        l2_normalize_batch(result.q_prime, config.K);
+        
+        return result;
+    }
+    
+    // Training forward pass
+    ForwardResult forward_training(const std::vector<float>& x) {
+        ForwardResult result;
+        
+        // Encode: x -> z (training mode)
+        std::vector<float> h = x;
+        for (auto& layer : encoder_layers) {
+            h = layer.forward_training(h, rng);
+        }
+        result.z = h;
+        
+        // Decode: z -> x̂ (training mode)
+        h = result.z;
+        for (auto& layer : decoder_layers) {
+            h = layer.forward_training(h, rng);
+        }
+        result.x_hat = h;
+        
+        // Re-encode: x̂ -> z′ (NO dropout for consistency)
+        h = result.x_hat;
+        for (const auto& layer : encoder_layers) {
+            h = layer.forward_inference(h);  // Use inference for re-encoding
+        }
+        result.z_prime = h;
+        
+        // Project and normalize
+        result.q = projector.forward_training(result.z, rng);
+        result.q_prime = projector.forward_inference(result.z_prime);
         
         // L2 normalize projections
         l2_normalize_batch(result.q, config.K);
@@ -507,7 +553,7 @@ public:
     void compute_losses(const std::vector<float>& x, ForwardResult& fwd) {
         size_t batch_size = x.size() / (config.T * config.D);
         
-        // Reconstruction loss with optional weighting
+        // Reconstruction loss
         fwd.rec_loss = 0.0f;
         const auto& constant_mask = processor.get_constant_mask();
         
@@ -516,7 +562,6 @@ public:
                 size_t idx = b * config.T * config.D + i;
                 float diff = x[idx] - fwd.x_hat[idx];
                 
-                // Weight by feature importance (only if we have mask info)
                 float weight = 1.0f;
                 if (!constant_mask.empty() && (i % config.D) < constant_mask.size()) {
                     size_t feature_idx = i % config.D;
@@ -528,36 +573,36 @@ public:
         }
         fwd.rec_loss /= (batch_size * config.T * config.D);
         
-        // Invariance loss: 2 - cos(q, Ce) - cos(q′, Ce)
+        // CRITICAL: Use frozen center for inference
+        const std::vector<float>& center_to_use = is_training_mode ? Ce : Ce_frozen;
+        
+        // Invariance loss
         fwd.inv_loss = 0.0f;
         for (size_t b = 0; b < batch_size; ++b) {
             float cos_q = 0.0f, cos_q_prime = 0.0f;
             for (size_t k = 0; k < config.K; ++k) {
-                cos_q += fwd.q[b * config.K + k] * Ce[k];
-                cos_q_prime += fwd.q_prime[b * config.K + k] * Ce[k];
+                cos_q += fwd.q[b * config.K + k] * center_to_use[k];
+                cos_q_prime += fwd.q_prime[b * config.K + k] * center_to_use[k];
             }
             fwd.inv_loss += (2.0f - cos_q - cos_q_prime);
         }
         fwd.inv_loss /= batch_size;
         
-        // Variance loss with stability fix
+        // Variance loss
         fwd.var_loss = 0.0f;
         
-        // CRITICAL FIX: Skip variance loss for batch_size < 2 (degenerate case)
         if (batch_size < 2) {
             fwd.var_loss = 0.0f;
             return;
         }
         
         for (size_t k = 0; k < config.K; ++k) {
-            // Compute mean
             float mean = 0.0f;
             for (size_t b = 0; b < batch_size; ++b) {
                 mean += fwd.q[b * config.K + k];
             }
             mean /= batch_size;
             
-            // Compute variance with epsilon
             float var = 0.0f;
             for (size_t b = 0; b < batch_size; ++b) {
                 float diff = fwd.q[b * config.K + k] - mean;
@@ -565,7 +610,6 @@ public:
             }
             var /= batch_size;
             
-            // Stable std computation
             float std = std::sqrt(var + config.variance_epsilon);
             fwd.var_loss += std::max(0.0f, config.zeta - std);
         }
@@ -573,10 +617,11 @@ public:
     }
     
     float train_step(const std::vector<float>& x_batch, float lr, size_t epoch) {
-        is_training = true;
+        // Set training mode
+        is_training_mode = true;
         
-        // Forward pass
-        auto fwd = forward(x_batch, true);
+        // Forward pass (training mode)
+        auto fwd = forward_training(x_batch);
         compute_losses(x_batch, fwd);
         
         // Compute total loss with ramp
@@ -617,25 +662,27 @@ public:
             layer.update_adam(lr);
         }
         
-        // Update center during warm-up ONLY
+        // Update center during warm-up
         if (epoch < config.center_warmup_epochs) {
             update_center(fwd.q, fwd.q_prime, batch_size);
         }
         
-        is_training = false;
+        // Reset training mode
+        is_training_mode = false;
+        
         return total_loss;
     }
     
-    // CRITICAL FIX: Make scoring completely stateless
+    // CRITICAL: Completely stateless scoring
     float score_window(const std::vector<float>& window) {
-        // Clear all caches before scoring
-        clear_all_caches();
+        // CRITICAL: Ensure inference mode
+        is_training_mode = false;
         
-        // Normalize window
+        // Normalize window (creates fresh copy)
         auto normalized = processor.normalize(window, config.T);
         
-        // Forward pass with training=false to prevent any state updates
-        auto fwd = forward(normalized, false);
+        // CRITICAL: Use inference-only forward pass
+        auto fwd = forward_inference(normalized);
         compute_losses(normalized, fwd);
         
         // Score based on config
@@ -646,16 +693,29 @@ public:
         }
     }
     
+    void finalize_training() {
+        // CRITICAL: Freeze the center after training
+        Ce_frozen = Ce;
+        is_training_mode = false;
+        
+        // Clear all training caches
+        for (auto& layer : encoder_layers) {
+            layer.clear_caches();
+        }
+        for (auto& layer : decoder_layers) {
+            layer.clear_caches();
+        }
+        projector.clear_caches();
+    }
+    
     float compute_threshold(const std::vector<float>& val_scores) {
         if (config.threshold_mode == "quantile") {
-            // Compute percentile
             std::vector<float> sorted_scores = val_scores;
             std::sort(sorted_scores.begin(), sorted_scores.end());
             size_t idx = static_cast<size_t>(config.threshold_quantile * sorted_scores.size());
             idx = std::min(idx, sorted_scores.size() - 1);
             return sorted_scores[idx];
         } else {  // zscore
-            // Mean + k*std
             float mean = std::accumulate(val_scores.begin(), val_scores.end(), 0.0f) / val_scores.size();
             float var = 0.0f;
             for (float s : val_scores) {
@@ -685,10 +745,9 @@ private:
         }
     }
     
-    // CRITICAL: Only update center during training warmup
     void update_center(const std::vector<float>& q, const std::vector<float>& q_prime, size_t batch_size) {
-        // CRITICAL: Only update during training and warmup
-        if (!is_training) return;
+        // CRITICAL: Only update during training mode
+        if (!is_training_mode) return;
         
         // Compute batch mean of q and q′
         std::vector<float> mean_q(config.K, 0.0f);
@@ -713,7 +772,7 @@ private:
     }
 };
 
-// Training function remains the same but with explicit training mode management
+// Training function with finalization
 void train_coca_model(COCAModel& model,
                      std::vector<std::vector<float>>& windows,
                      const COCAConfig& config) {
@@ -724,9 +783,6 @@ void train_coca_model(COCAModel& model,
               << ", λ_inv=" << config.lambda_inv 
               << ", λ_var=" << config.lambda_var 
               << ", ζ=" << config.zeta << "\n";
-    
-    // Set training mode
-    model.is_training = true;
     
     // Compute feature statistics
     model.processor.compute_stats(windows, config.T, config.D, config.min_std);
@@ -775,9 +831,8 @@ void train_coca_model(COCAModel& model,
             size_t batch_end = std::min(batch_start + config.batch_size, train_indices.size());
             size_t actual_batch_size = batch_end - batch_start;
             
-            // CRITICAL: Only process batches with at least 2 samples for variance
             if (actual_batch_size < 2 && batch_idx > 0) {
-                continue; // Skip single-sample batches except the first
+                continue;
             }
             
             for (size_t i = batch_start; i < batch_end; ++i) {
@@ -785,7 +840,7 @@ void train_coca_model(COCAModel& model,
                 batch.insert(batch.end(), normalized.begin(), normalized.end());
             }
             
-            // Pad batch if necessary (but ensure at least 2 samples)
+            // Pad batch if necessary
             while (batch.size() < config.batch_size * config.T * config.D) {
                 auto normalized = model.processor.normalize(windows[train_indices[0]], config.T);
                 batch.insert(batch.end(), normalized.begin(), normalized.end());
@@ -796,7 +851,7 @@ void train_coca_model(COCAModel& model,
             epoch_loss += loss;
             
             // Get component losses for logging
-            auto fwd = model.forward(batch, false);
+            auto fwd = model.forward_inference(batch);
             model.compute_losses(batch, fwd);
             epoch_rec += fwd.rec_loss;
             epoch_inv += fwd.inv_loss;
@@ -848,8 +903,8 @@ void train_coca_model(COCAModel& model,
     
     log_file.close();
     
-    // CRITICAL: Set training mode to false after training
-    model.is_training = false;
+    // CRITICAL: Finalize training (freeze center, clear caches)
+    model.finalize_training();
     
     // Compute threshold on validation set
     std::vector<float> val_scores;

@@ -25,8 +25,8 @@ epochs: 50
 val_split: 0.2
 
 # Score and threshold
-score_mix: inv_only         # Options: inv_only, inv_plus_rec
-threshold_mode: quantile    # Options: quantile, zscore
+score_mix: inv_only
+threshold_mode: quantile
 threshold_quantile: 0.995
 threshold_zscore_k: 3
 

@@ -6,5 +6,5 @@ CXX_DEFINES =
 
 CXX_INCLUDES = -I"/mnt/c/Users/rocks/OneDrive/Documents/Fall 2025/RoCA Model Versions/CoCA-Model-v4/src"
 
-CXX_FLAGS =  -fopenmp -std=c++17 -Wall -Wextra -O3 -march=native -fopenmp -fopenmp
+CXX_FLAGS =  -fopenmp -O3 -DNDEBUG -std=c++17 -Wall -Wextra -O3 -march=native -fopenmp -fopenmp
 
