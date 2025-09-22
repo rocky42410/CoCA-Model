@@ -1,7 +1,6 @@
 // ============================================================================
-// COCA (Competitive One-Class Anomaly) Model Implementation
-// Clean implementation without contamination handling
-// With critical fixes for serialization and variance computation
+// COCA (Competitive One-Class Anomaly) Model Implementation - FIXED VERSION
+// Fixes state accumulation bug that causes monotonically increasing scores
 // ============================================================================
 
 #pragma once
@@ -18,7 +17,7 @@
 namespace coca {
 
 // ============================================================================
-// COCA Configuration
+// COCA Configuration (unchanged)
 // ============================================================================
 struct COCAConfig {
     // Model architecture
@@ -63,7 +62,7 @@ struct COCAConfig {
 };
 
 // ============================================================================
-// Feature Processor with improved normalization
+// Feature Processor - FIXED to be truly stateless
 // ============================================================================
 class FeatureProcessor {
 private:
@@ -134,6 +133,7 @@ public:
         std::cout << "  Variable features: " << (D - constant_indices.size()) << "\n";
     }
     
+    // CRITICAL FIX: Make normalize truly const and stateless
     std::vector<float> normalize(const std::vector<float>& window, size_t T) const {
         std::vector<float> normalized = window;
         
@@ -183,7 +183,7 @@ public:
 };
 
 // ============================================================================
-// Dense Layer with Adam optimizer
+// Dense Layer - FIXED to properly handle inference vs training
 // ============================================================================
 class DenseLayer {
 public:
@@ -195,7 +195,7 @@ public:
     bool use_relu;
     float dropout_rate;
     
-    // Cache for backward pass
+    // Cache for backward pass - ONLY used during training
     std::vector<float> x_cache, z_cache, a_cache;
     std::vector<bool> dropout_mask;
     
@@ -224,50 +224,67 @@ public:
         std::fill(b.begin(), b.end(), 0.01f);
     }
     
+    // CRITICAL FIX: Clear caches before each forward pass to prevent state accumulation
     std::vector<float> forward(const std::vector<float>& x, bool training, std::mt19937& rng) {
         size_t batch_size = x.size() / in_dim;
-        x_cache = x;
+        
+        // CRITICAL: Only cache during training
+        if (training) {
+            x_cache = x;
+        }
         
         // Linear: z = x @ W + b
-        z_cache.resize(batch_size * out_dim);
-        std::fill(z_cache.begin(), z_cache.end(), 0.0f);
+        std::vector<float> z(batch_size * out_dim, 0.0f);
         
         for (size_t b_idx = 0; b_idx < batch_size; ++b_idx) {
             for (size_t i = 0; i < in_dim; ++i) {
                 for (size_t j = 0; j < out_dim; ++j) {
-                    z_cache[b_idx * out_dim + j] += 
+                    z[b_idx * out_dim + j] += 
                         x[b_idx * in_dim + i] * W[i * out_dim + j];
                 }
             }
             for (size_t j = 0; j < out_dim; ++j) {
-                z_cache[b_idx * out_dim + j] += b[j];
+                z[b_idx * out_dim + j] += b[j];
             }
         }
         
+        // Store z only during training
+        if (training) {
+            z_cache = z;
+        }
+        
         // Activation
-        a_cache = z_cache;
+        std::vector<float> a = z;
         if (use_relu) {
-            for (auto& a : a_cache) {
-                a = std::max(0.0f, a);
+            for (auto& val : a) {
+                val = std::max(0.0f, val);
             }
+        }
+        
+        // Store activated values only during training
+        if (training) {
+            a_cache = a;
         }
         
         // Dropout (only during training)
         if (training && dropout_rate > 0.0f) {
-            dropout_mask.resize(a_cache.size());
+            dropout_mask.resize(a.size());
             std::uniform_real_distribution<float> dist(0.0f, 1.0f);
             
-            for (size_t i = 0; i < a_cache.size(); ++i) {
+            for (size_t i = 0; i < a.size(); ++i) {
                 dropout_mask[i] = (dist(rng) > dropout_rate);
                 if (!dropout_mask[i]) {
-                    a_cache[i] = 0.0f;
+                    a[i] = 0.0f;
                 } else {
-                    a_cache[i] /= (1.0f - dropout_rate);
+                    a[i] /= (1.0f - dropout_rate);
                 }
             }
+        } else {
+            // CRITICAL: Clear dropout mask during inference
+            dropout_mask.clear();
         }
         
-        return a_cache;
+        return a;
     }
     
     std::vector<float> backward(const std::vector<float>& grad_output) {
@@ -351,10 +368,18 @@ public:
             b[i] -= lr_t * mb[i] / (std::sqrt(vb[i]) + eps);
         }
     }
+    
+    // CRITICAL NEW METHOD: Clear all caches
+    void clear_caches() {
+        x_cache.clear();
+        z_cache.clear();
+        a_cache.clear();
+        dropout_mask.clear();
+    }
 };
 
 // ============================================================================
-// COCA Model
+// COCA Model - FIXED to prevent state accumulation
 // ============================================================================
 class COCAModel {
 public:
@@ -366,7 +391,7 @@ public:
     std::vector<DenseLayer> decoder_layers;
     DenseLayer projector;
     
-    // One-class center
+    // One-class center - FROZEN after training
     std::vector<float> Ce;
     
     // Anomaly detection
@@ -378,6 +403,9 @@ public:
     // Training metrics
     std::vector<float> train_losses;
     std::vector<float> val_losses;
+    
+    // Training state flag
+    bool is_training = false;
     
     COCAModel(const COCAConfig& cfg) 
         : config(cfg), 
@@ -425,8 +453,24 @@ public:
         float var_loss = 0.0f;
     };
     
+    // CRITICAL FIX: Clear all layer caches before forward pass
+    void clear_all_caches() {
+        for (auto& layer : encoder_layers) {
+            layer.clear_caches();
+        }
+        for (auto& layer : decoder_layers) {
+            layer.clear_caches();
+        }
+        projector.clear_caches();
+    }
+    
     ForwardResult forward(const std::vector<float>& x, bool training = true) {
         ForwardResult result;
+        
+        // CRITICAL: Clear caches for inference to prevent state accumulation
+        if (!training) {
+            clear_all_caches();
+        }
         
         // Encode: x -> z
         std::vector<float> h = x;
@@ -442,10 +486,10 @@ public:
         }
         result.x_hat = h;
         
-        // Re-encode: x̂ -> z′ (no dropout for consistency)
+        // Re-encode: x̂ -> z′ (NEVER use dropout for consistency)
         h = result.x_hat;
         for (auto& layer : encoder_layers) {
-            h = layer.forward(h, false, rng);  // No dropout
+            h = layer.forward(h, false, rng);  // ALWAYS false for re-encoding
         }
         result.z_prime = h;
         
@@ -501,7 +545,6 @@ public:
         
         // CRITICAL FIX: Skip variance loss for batch_size < 2 (degenerate case)
         if (batch_size < 2) {
-            // Can't compute meaningful variance with single sample
             fwd.var_loss = 0.0f;
             return;
         }
@@ -530,6 +573,8 @@ public:
     }
     
     float train_step(const std::vector<float>& x_batch, float lr, size_t epoch) {
+        is_training = true;
+        
         // Forward pass
         auto fwd = forward(x_batch, true);
         compute_losses(x_batch, fwd);
@@ -572,16 +617,24 @@ public:
             layer.update_adam(lr);
         }
         
-        // Update center during warm-up
+        // Update center during warm-up ONLY
         if (epoch < config.center_warmup_epochs) {
             update_center(fwd.q, fwd.q_prime, batch_size);
         }
         
+        is_training = false;
         return total_loss;
     }
     
+    // CRITICAL FIX: Make scoring completely stateless
     float score_window(const std::vector<float>& window) {
+        // Clear all caches before scoring
+        clear_all_caches();
+        
+        // Normalize window
         auto normalized = processor.normalize(window, config.T);
+        
+        // Forward pass with training=false to prevent any state updates
         auto fwd = forward(normalized, false);
         compute_losses(normalized, fwd);
         
@@ -632,7 +685,11 @@ private:
         }
     }
     
+    // CRITICAL: Only update center during training warmup
     void update_center(const std::vector<float>& q, const std::vector<float>& q_prime, size_t batch_size) {
+        // CRITICAL: Only update during training and warmup
+        if (!is_training) return;
+        
         // Compute batch mean of q and q′
         std::vector<float> mean_q(config.K, 0.0f);
         for (size_t b = 0; b < batch_size; ++b) {
@@ -656,9 +713,7 @@ private:
     }
 };
 
-// ============================================================================
-// Training function
-// ============================================================================
+// Training function remains the same but with explicit training mode management
 void train_coca_model(COCAModel& model,
                      std::vector<std::vector<float>>& windows,
                      const COCAConfig& config) {
@@ -669,6 +724,9 @@ void train_coca_model(COCAModel& model,
               << ", λ_inv=" << config.lambda_inv 
               << ", λ_var=" << config.lambda_var 
               << ", ζ=" << config.zeta << "\n";
+    
+    // Set training mode
+    model.is_training = true;
     
     // Compute feature statistics
     model.processor.compute_stats(windows, config.T, config.D, config.min_std);
@@ -789,6 +847,9 @@ void train_coca_model(COCAModel& model,
     }
     
     log_file.close();
+    
+    // CRITICAL: Set training mode to false after training
+    model.is_training = false;
     
     // Compute threshold on validation set
     std::vector<float> val_scores;

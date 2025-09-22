@@ -17,20 +17,20 @@ zeta: 1.0               # Target std for variance loss
 variance_epsilon: 0.0001  # Epsilon for numerical stability
 
 # Center parameters
-center_warmup_epochs: 8    # Epochs to warm up center
-inv_ramp_epochs: 20        # Epochs to ramp up invariance
+center_warmup_epochs: 16   # Epochs to warm up center
+inv_ramp_epochs: 40   # Epochs to ramp up invariance
 
 # Training parameters
 learning_rate: 0.0005
 batch_size: 32
-epochs: 50
+epochs: 100
 val_split: 0.2
 
 # Score and threshold
 score_mix: inv_only         # Options: inv_only, inv_plus_rec
 threshold_mode: quantile    # Options: quantile, zscore
-threshold_quantile: 0.995
-threshold_zscore_k: 3.0
+threshold_quantile: 0.995 # default is 0.995
+threshold_zscore_k: 3
 
 # Misc
 min_std: 0.0001

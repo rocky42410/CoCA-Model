@@ -1,13 +1,13 @@
 # COCA Training Summary
-# Thu Sep 18 11:52:26 2025
+# Mon Sep 22 10:25:50 2025
 
-Data file: ../../Data_Captures/Feature Set 3/idle_one_leg_1.csv
+Data file: ../../Data_Captures/Feature Set 3/idle_one_leg_2.csv
 Samples: 30002
-Features: 1
+Features: 2
 Training windows: 5999
 Window size: 10
 Window stride: 5
 Latent dim: 32
 Projection dim: 16
-Final threshold: 3.45841
-Training time: 2 seconds
+Final threshold: 0.853638
+Training time: 4 seconds

@@ -1,0 +1,42 @@
+# COCA Configuration File
+# Clean Competitive One-Class Anomaly Detector
+
+# Model architecture
+T: 50          # Window size
+D: 1         # Feature dimension (updated by data)
+C: 2           # Latent dimension
+K: 1           # Projection dimension
+
+# Loss weights
+lambda_inv: 1.0     # Invariance loss weight
+lambda_var: 2.0     # Variance loss weight
+lambda_rec: 0.0     # Reconstruction weight (0 for pure COCA)
+
+# Variance parameters
+zeta: 1.0               # Target std for variance loss
+variance_epsilon: 0.0001  # Epsilon for numerical stability
+
+# Center parameters
+center_warmup_epochs: 5   # Epochs to warm up center
+inv_ramp_epochs: 15   # Epochs to ramp up invariance
+
+# Training parameters
+learning_rate: 0.003
+batch_size: 32
+epochs: 60
+val_split: 0.2
+
+# Score and threshold
+score_mix: inv_only         # Options: inv_only, inv_plus_rec
+threshold_mode: quantile    # Options: quantile, zscore
+threshold_quantile: 0.995
+threshold_zscore_k: 3.0
+
+# Misc
+min_std: 0.0001
+dropout_rate: 0.1
+seed: 42
+
+# Early stopping
+early_stop_patience: 10
+early_stop_min_delta: 0.000001

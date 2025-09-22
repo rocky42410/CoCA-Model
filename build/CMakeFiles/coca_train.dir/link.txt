@@ -1,1 +1,1 @@
-/usr/bin/c++  -fopenmp -O3 -DNDEBUG CMakeFiles/coca_train.dir/apps/coca_train.cpp.o -o coca_train  /usr/lib/gcc/x86_64-linux-gnu/13/libgomp.so /usr/lib/x86_64-linux-gnu/libpthread.a 
+/usr/bin/c++  -fopenmp CMakeFiles/coca_train.dir/apps/coca_train.cpp.o -o coca_train  /usr/lib/gcc/x86_64-linux-gnu/13/libgomp.so /usr/lib/x86_64-linux-gnu/libpthread.a 

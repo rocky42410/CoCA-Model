@@ -1,0 +1,125 @@
+============================================
+COCA Bug Verification & Fix Script
+============================================
+
+Step 1: Checking current implementation...
+==========================================
+Checking src/coca_model.hpp for bug signatures...
+
+✅ Found clear_caches() method
+✅ Found clear_all_caches() method
+✅ Found is_training flag
+✅ score_window() calls clear_all_caches()
+
+✅ ALL FIXES APPEAR TO BE PRESENT
+
+Fixes appear to be present in the code.
+Checking if rebuild is needed...
+
+Step 4: Rebuilding with fixed code...
+==========================================
+Cleaning old build...
+Reconfiguring...
+Building...
+✅ Executables successfully rebuilt
+
+Step 5: Compiling debug test...
+==========================================
+✅ Debug test compiled
+
+Step 6: Running debug test...
+==========================================
+
+=== COCA Debug Test ===
+
+1. Creating 100 IDENTICAL test windows...
+   Created 100 identical windows
+
+2. Training COCA model...
+
+=== Training COCA Model ===
+Windows: 100
+Config: λ_rec=0.1, λ_inv=1, λ_var=1, ζ=1
+
+Feature Statistics:
+  Total features: 50
+  Constant features: 0
+  Variable features: 50
+Train: 80 | Val: 20
+
+Epoch   5/5 | Train: 1.215931 | Val: 1.524334 | L_rec=1.003448 | L_inv=1.578611 | L_var=0.990000 *
+
+=== Training Complete ===
+Validation scores:
+  Mean: 1.524334
+  Min: 1.524334
+  Max: 1.524334
+  Threshold: 1.524334
+   Training complete
+
+3. Testing scores on IDENTICAL windows:
+   (These should all be EXACTLY the same if no state accumulation)
+
+   Window  0: 1.52433419
+   Window  1: 1.52433419 ✓ same
+   Window  2: 1.52433419 ✓ same
+   Window  3: 1.52433419 ✓ same
+   Window  4: 1.52433419 ✓ same
+   Window  5: 1.52433419 ✓ same
+   Window  6: 1.52433419 ✓ same
+   Window  7: 1.52433419 ✓ same
+   Window  8: 1.52433419 ✓ same
+   Window  9: 1.52433419 ✓ same
+   Window 10: 1.52433419 ✓ same
+   Window 11: 1.52433419 ✓ same
+   Window 12: 1.52433419 ✓ same
+   Window 13: 1.52433419 ✓ same
+   Window 14: 1.52433419 ✓ same
+   Window 15: 1.52433419 ✓ same
+   Window 16: 1.52433419 ✓ same
+   Window 17: 1.52433419 ✓ same
+   Window 18: 1.52433419 ✓ same
+   Window 19: 1.52433419 ✓ same
+
+4. Checking for monotonic behavior:
+   =   =   =   =   =   =   =   =   =   =   =   =   =   =   =   =   =   =   =
+
+   Results: 0 increases, 0 decreases, 19 unchanged
+
+   ✅ GOOD: All scores are identical (expected for identical inputs)
+
+5. Testing with DIFFERENT windows:
+   Variation 0: 1.52433419
+   Variation 1: 1.52532661
+   Variation 2: 1.52585530
+   Variation 3: 1.52640915
+   Variation 4: 1.52697492
+   Variation 5: 1.52753997
+   Variation 6: 1.52812958
+   Variation 7: 1.52874136
+   Variation 8: 1.52931237
+   Variation 9: 1.52985620
+
+=== DIAGNOSIS ===
+✅ Identical inputs produce identical scores - GOOD
+✅ Different inputs produce different scores - GOOD
+   Variation range: 0.00552201
+
+Step 7: Testing on your data...
+==========================================
+Test data not found
+
+============================================
+Verification Complete
+============================================
+
+IMPORTANT NEXT STEPS:
+1. If fixes were just applied, you MUST retrain your model
+2. Old models trained with buggy code will still have the bug
+3. Only use models trained AFTER applying and rebuilding with the fix
+
+To train a new model:
+  ./coca_train --csv your_data.csv --window 10 --stride 5
+
+To test the new model:
+  ./coca_test --csv test_data.csv --model trained_model.coca
