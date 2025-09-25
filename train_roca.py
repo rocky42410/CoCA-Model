@@ -278,8 +278,43 @@ def train(args):
         if (epoch + 1) % max(1, args.log_every) == 0:
             print(f"epoch {epoch+1}/{args.epochs} | loss={loss.item():.4f} | L_joint={l_joint.item():.4f} | L_var={l_var.item():.4f}")
 
+    model.eval()
+    all_q = []
+    all_qp = []
+    with torch.no_grad():
+        for X in DataLoader(ds, batch_size=256, shuffle=False, drop_last=False):
+            X = X.to(device)
+            q, qp, _, _ = model(X)
+            all_q.append(q)
+            all_qp.append(qp)
+    Ce_train = torch.nn.functional.normalize(torch.cat(all_q+all_qp, dim=0).mean(dim=0, keepdim=True), dim=1)
+    
+    safe_ckpt = {
+    "state_dict": model.state_dict(),
+    "in_dim": int(in_dim),
+    "window": int(args.window),
+    "stride": int(args.stride),
+    "standardize_mean": torch.from_numpy(ds.mean.astype(np.float32)),
+    "standardize_std": torch.from_numpy(ds.std.astype(np.float32)),
+    "Ce_train": Ce_train.cpu(),  # <-- add this
+    "config": {k: v for k,v in vars(args).items() if isinstance(v,(int,float,str,bool))}
+    }
+    
+    # Calibrate tau on training windows
+    S_train = []
+    with torch.no_grad():
+        for X in DataLoader(ds, batch_size=256, shuffle=False):
+            X = X.to(device)
+            q, qp, _, _ = model(X)
+            s = 2.0 - cosine_sim(q, Ce_train.expand_as(q)) - cosine_sim(qp, Ce_train.expand_as(qp))
+            S_train.append(s.cpu().numpy())
+    S_train = np.concatenate(S_train)
+    tau = float(S_train.mean() + 3.0 * S_train.std())  # choose your k
+    safe_ckpt["tau"] = tau
+
     os.makedirs(os.path.dirname(args.model_out) or ".", exist_ok=True)
-    torch.save({
+    torch.save(safe_ckpt, args.model_out)
+    """torch.save({
         "state_dict": model.state_dict(),
         "in_dim": in_dim,
         "window": args.window,
@@ -287,7 +322,7 @@ def train(args):
         "standardize_mean": ds.mean,
         "standardize_std": ds.std,
         "config": vars(args),
-    }, args.model_out)
+    }, args.model_out) """
     print(f"Saved model to: {args.model_out}")
 
 # ---------------------

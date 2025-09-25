@@ -87,6 +87,9 @@ def load_model(ckpt_path, device):
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     cfg = ckpt["config"]
     in_dim = ckpt["in_dim"]
+
+    
+
     net = RoCANet(
         in_dim=in_dim,
         num_tcn_blocks=cfg["tcn_blocks"],
@@ -98,9 +101,21 @@ def load_model(ckpt_path, device):
     ).to(device)
     net.load_state_dict(ckpt["state_dict"])
     net.eval()
-    stats = {"mean": np.array(ckpt["standardize_mean"]), "std": np.array(ckpt["standardize_std"])}
+    mean_t = ckpt["standardize_mean"]
+    std_t  = ckpt["standardize_std"]
+    stats = {
+        "mean": mean_t.detach().cpu().numpy(),
+        "std":  std_t.detach().cpu().numpy(),
+    }
+
     meta = {"window": ckpt["window"], "stride": ckpt["stride"], "in_dim": in_dim}
-    return net, stats, meta
+
+    # recalc center for 1 feature tests
+    Ce_train = ckpt.get("Ce_train", None)
+    if Ce_train is None:
+        raise RuntimeError("Checkpoint missing Ce_train. Re-train/save with Ce_train or fall back is unsafe.")
+    Ce_train = Ce_train.to(device)
+    return net, stats, meta, Ce_train, ckpt
 
 def standardize(x, mean, std):
     return (x - mean) / (std + 1e-8)
@@ -120,9 +135,19 @@ def main():
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
-    model, stats, meta = load_model(args.model, device)
+    model, stats, meta, Ce_train, ckpt = load_model(args.model, device)
+
 
     df = pd.read_csv(args.csv)
+    df = df.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
+
+    # Optional: print a quick health report
+    rows_with_nan = int(df.isna().any(axis=1).sum())
+    if rows_with_nan > 0:
+        print(f"[WARN] Test CSV has {rows_with_nan} rows with NaN. "
+            f"Dropping them to avoid NaN scores.")
+        df = df.dropna(axis=0)
+
     if args.cols:
         df = df[args.cols.split(",")]
     X = df.values.astype(np.float32)
@@ -150,17 +175,22 @@ def main():
         for i in range(0, win_t.shape[0], args.batch_size):
             xb = win_t[i:i+args.batch_size]              # [B, D, L]
             q, qp, _, _ = model(xb)                      # [B, P]
-            Ce = batch_center(q, qp)                     # [1, P] (batch estimate)
-            s = 2.0 - cosine_sim(q, Ce.expand_as(q)) - cosine_sim(qp, Ce.expand_as(qp))
+            s = 2.0 - cosine_sim(q, Ce_train.expand_as(q)) - cosine_sim(qp, Ce_train.expand_as(qp))            
             scores.append(s.detach().cpu().numpy())
     scores = np.concatenate(scores, axis=0)              # [N]
 
-    # Thresholding
+    # Thresholding logic
     if args.threshold is not None:
+        # User provided threshold on CLI
         thr = float(args.threshold)
+    elif "tau" in ckpt and ckpt["tau"] is not None:
+        # Use training-calibrated threshold if available in checkpoint
+        thr = float(ckpt["tau"])
     else:
+        # Fallback: compute mean+z*std from test scores
         mu, sd = float(scores.mean()), float(scores.std() + 1e-12)
         thr = mu + args.z_k * sd
+
 
     labels = (scores > thr).astype(np.int32)
 
