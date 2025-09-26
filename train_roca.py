@@ -89,16 +89,19 @@ class TCNEncoder(nn.Module):
     """
     Multi-block 1D CNN encoder: Conv1d -> BN -> ReLU -> MaxPool1d (+ optional Dropout in first block)
     """
-    def __init__(self, in_dim, hidden=64, num_blocks=3, dropout_p=0.45, pool=2):
+    def __init__(self, in_dim, hidden=64, num_blocks=3, dropout_p=0.45, pool= 2, pool_plan=None):
         super().__init__()
         layers = []
         c_in = in_dim
+        if pool_plan is None:
+            pool_plan = [pool] * num_blocks
+        assert len(pool_plan) == num_blocks, 'pool_plan length must equal num_blocks'
         for b in range(num_blocks):
             layers += [
                 nn.Conv1d(c_in, hidden, kernel_size=5, padding=2, bias=False),
                 nn.BatchNorm1d(hidden),
                 nn.ReLU(inplace=True),
-                nn.MaxPool1d(kernel_size=pool, stride=pool),
+                nn.MaxPool1d(kernel_size=pool_plan[b], stride=pool_plan[b]),
             ]
             if b == 0 and dropout_p > 0:
                 layers.append(nn.Dropout(dropout_p))
@@ -145,14 +148,14 @@ class Projector(nn.Module):
     def forward(self, z):  # [B, C, L'] -> produce per-time-step projections, then mean over time
         q_seq = self.net(z)                      # [B, P, L']
         q = q_seq.mean(dim=-1)                  # [B, P]
-        q = nn.functional.normalize(q, dim=1)   # on unit hypersphere
+        q = nn.functional.normalize(q, dim=1, eps=1e-8)
+        q = torch.nan_to_num(q)
         return q
-
 class RoCANet(nn.Module):
     def __init__(self, in_dim, num_tcn_blocks=3, tcn_hidden=64, proj_dim=128, proj_hidden=256,
-                 lstm_hidden=128, lstm_layers=3):
+                 lstm_hidden=128, lstm_layers=3, tcn_pool_plan=None):
         super().__init__()
-        self.encoder = TCNEncoder(in_dim, hidden=tcn_hidden, num_blocks=num_tcn_blocks)
+        self.encoder = TCNEncoder(in_dim, hidden=tcn_hidden, num_blocks=num_tcn_blocks, pool_plan=tcn_pool_plan)
         self.seq2seq = Seq2SeqLSTM(c_feat=tcn_hidden, hidden_lstm=lstm_hidden, num_layers=lstm_layers)
         self.projector = Projector(in_dim=tcn_hidden, proj_dim=proj_dim, hidden=proj_hidden)
 
@@ -219,6 +222,9 @@ def train(args):
     loader = DataLoader(ds, batch_size=args.batch_size, shuffle=True, drop_last=True)
 
     in_dim = ds.windows.shape[2]  # D
+    pool_plan = None
+    if getattr(args, 'tcn_pool_plan', None):
+        pool_plan = [int(p.strip()) for p in args.tcn_pool_plan.split(',')]
     model = RoCANet(
         in_dim=in_dim,
         num_tcn_blocks=args.tcn_blocks,
@@ -227,6 +233,7 @@ def train(args):
         proj_hidden=args.proj_hidden,
         lstm_hidden=args.lstm_hidden,
         lstm_layers=args.lstm_layers,
+        tcn_pool_plan=pool_plan,
     ).to(device)
 
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.99), weight_decay=5e-4)
@@ -314,15 +321,49 @@ def train(args):
 
     os.makedirs(os.path.dirname(args.model_out) or ".", exist_ok=True)
     torch.save(safe_ckpt, args.model_out)
-    """torch.save({
+    """
+    # ===== Calibration over training windows (Ce_train and tau) =====
+    model.eval()
+    from torch.utils.data import DataLoader
+    all_q, all_qp, S_train_chunks = [], [], []
+    with torch.no_grad():
+        for _X in DataLoader(ds, batch_size=256, shuffle=False, drop_last=False):
+            _X = _X.to(device)
+            _q, _qp, _, _ = model(_X)
+            all_q.append(_q); all_qp.append(_qp)
+    Q_all = torch.cat(all_q + all_qp, dim=0)  # [M, P]
+    Ce_train = nn.functional.normalize(Q_all.mean(dim=0, keepdim=True), dim=1)
+
+    with torch.no_grad():
+        for _X in DataLoader(ds, batch_size=256, shuffle=False, drop_last=False):
+            _X = _X.to(device)
+            _q, _qp, _, _ = model(_X)
+            _s = 2.0 - cosine_sim(_q, Ce_train.expand_as(_q)) - cosine_sim(_qp, Ce_train.expand_as(_qp))
+            S_train_chunks.append(_s.detach().cpu().numpy())
+    S_train = np.concatenate(S_train_chunks)
+    mu, sd = float(S_train.mean()), float(S_train.std())
+    tau = float(mu + 3.0 * sd)  # alternatively: np.percentile(S_train, 99.7)
+
+    # ===== Assemble "safe" checkpoint =====
+    save_mean = torch.from_numpy(ds.mean.astype(np.float32))
+    save_std  = torch.from_numpy(ds.std.astype(np.float32))
+    safe_ckpt = {
         "state_dict": model.state_dict(),
-        "in_dim": in_dim,
-        "window": args.window,
-        "stride": args.stride,
-        "standardize_mean": ds.mean,
-        "standardize_std": ds.std,
-        "config": vars(args),
-    }, args.model_out) """
+        "in_dim": int(in_dim),
+        "window": int(args.window),
+        "stride": int(args.stride),
+        "standardize_mean": save_mean,
+        "standardize_std": save_std,
+        "Ce_train": Ce_train.cpu(),
+        "tau": tau,
+        "config": {k: v for k, v in vars(args).items()
+                   if isinstance(v, (int, float, str, bool)) or v is None},
+    }
+    torch.save(safe_ckpt, args.model_out)
+    print(f"[train_roca] Saved model to: {args.model_out}")
+    print(f"[train_roca] Ce_norm={Ce_train.norm().item():.6f} | S_train min/mean/std/max="
+          f"{S_train.min():.6f}/{mu:.6f}/{sd:.6f}/{S_train.max():.6f} | tau={tau:.6f}")
+ """
     print(f"Saved model to: {args.model_out}")
 
 # ---------------------
@@ -340,6 +381,7 @@ def parse_args():
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--tcn_blocks", type=int, default=3)
     ap.add_argument("--tcn_hidden", type=int, default=64)
+    ap.add_argument("--tcn_pool_plan", default=None, help="Comma list of pool strides per block, e.g. '2,2,1'.")
     ap.add_argument("--lstm_hidden", type=int, default=128)
     ap.add_argument("--lstm_layers", type=int, default=3)
     ap.add_argument("--proj_dim", type=int, default=128)
@@ -358,6 +400,10 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    # To reduce nondeterminism; you can set seeds if you want exact reproducibility.
-    torch.backends.cudnn.benchmark = True
+    import random, numpy as _np
+    seed = 1337
+    random.seed(seed); _np.random.seed(seed)
+    torch.manual_seed(seed); torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
     train(args)
