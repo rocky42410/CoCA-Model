@@ -4,9 +4,9 @@ import sys
 
 def main(path):
     df = pd.read_csv(path)
-    if "joint_val" not in df.columns:
-        raise ValueError("CSV has no column named 'joint_val'")
-    col = df["joint_val"].dropna().astype(float)
+    if "joint_val_1" not in df.columns:
+        raise ValueError("CSV has no column named 'joint_val_1'")
+    col = df["joint_val_1"].dropna().astype(float)
 
     print(f"File: {path}")
     print(f"Count: {len(col)}")

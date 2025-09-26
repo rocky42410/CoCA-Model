@@ -1,0 +1,72 @@
+[INFO] Created data/idle_one_leg_1_subset.csv
+[OUTPUT] idle_one_leg_1_subset.csv:
+File: data/idle_one_leg_1_subset.csv
+Count: 7499
+Max   : 0.544242
+Median: 0.371074
+Mean  : 0.376157827310308
+Min   : 0.222645
+
+[INFO] Created data/idle_one_leg_2_EDIT_subset.csv
+[OUTPUT] idle_one_leg_2_EDIT_subset.csv:
+File: data/idle_one_leg_2_EDIT_subset.csv
+Count: 7499
+Max   : 0.544242
+Median: 0.371074
+Mean  : 0.3705299270569409
+Min   : 0.14843
+
+[INFO] Created data/idle_one_leg_3_EDIT_subset.csv
+[OUTPUT] idle_one_leg_3_EDIT_subset.csv:
+File: data/idle_one_leg_3_EDIT_subset.csv
+Count: 30018
+Max   : 0.470027
+Median: 0.247383
+Mean  : 0.23291568865347456
+Min   : 0.049477
+
+[INFO] Created data/idle_one_leg_5_subset.csv
+[OUTPUT] idle_one_leg_5_subset.csv:
+File: data/idle_one_leg_5_subset.csv
+Count: 7499
+Max   : 0.346336
+Median: 0.173168
+Mean  : 0.17463281664221897
+Min   : -0.024738
+
+[INFO] Created data/one_sit_n_stand_LOCK_subset.csv
+[OUTPUT] one_sit_n_stand_LOCK_subset.csv:
+File: data/one_sit_n_stand_LOCK_subset.csv
+Count: 7499
+Max   : 0.445289
+Median: 0.222645
+Mean  : 0.21000672289638617
+Min   : 0.049477
+
+[INFO] Created data/one_sit_n_stand_UNLOCK_subset.csv
+[OUTPUT] one_sit_n_stand_UNLOCK_subset.csv:
+File: data/one_sit_n_stand_UNLOCK_subset.csv
+Count: 7500
+Max   : 0.519504
+Median: 0.346336
+Mean  : 0.3535727334666667
+Min   : 0.14843
+
+[INFO] Created data/two_sit_n_stand_LOCK_subset.csv
+[OUTPUT] two_sit_n_stand_LOCK_subset.csv:
+File: data/two_sit_n_stand_LOCK_subset.csv
+Count: 7500
+Max   : 2.30066
+Median: 0.272121
+Mean  : 0.24978415279999996
+Min   : -7.322532
+
+[INFO] Created data/two_sit_n_stand_UNLOCK_subset.csv
+[OUTPUT] two_sit_n_stand_UNLOCK_subset.csv:
+File: data/two_sit_n_stand_UNLOCK_subset.csv
+Count: 7499
+Max   : 2.325398
+Median: 0.247383
+Mean  : 0.2127183997866382
+Min   : -7.693606
+
