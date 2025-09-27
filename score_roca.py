@@ -1,201 +1,198 @@
-import argparse, os, math
+# score_roca.py — compatible with the updated train_roca.py
+import argparse, os
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-# ---------- must match train_roca.py ----------
-class TCNEncoder(nn.Module):
-    def __init__(self, in_dim, hidden=64, num_blocks=3, dropout_p=0.45, pool=2):
-        super().__init__()
-        layers, c_in = [], in_dim
-        for b in range(num_blocks):
-            layers += [
-                nn.Conv1d(c_in, hidden, kernel_size=5, padding=2, bias=False),
-                nn.BatchNorm1d(hidden),
-                nn.ReLU(inplace=True),
-                nn.MaxPool1d(kernel_size=pool, stride=pool),
-            ]
-            if b == 0 and dropout_p > 0:
-                layers.append(nn.Dropout(dropout_p))
-            c_in = hidden
-        self.net = nn.Sequential(*layers)
-    def forward(self, x): return self.net(x)
+# -----------------------
+# Utils
+# -----------------------
 
-class Seq2SeqLSTM(nn.Module):
-    def __init__(self, c_feat: int, hidden_lstm: int = 128, num_layers: int = 3):
-        super().__init__()
-        self.c_feat = c_feat
-        self.enc = nn.LSTM(input_size=c_feat, hidden_size=hidden_lstm, num_layers=num_layers, batch_first=True)
-        self.dec = nn.LSTM(input_size=hidden_lstm, hidden_size=hidden_lstm, num_layers=num_layers, batch_first=True)
-        self.proj = nn.Linear(hidden_lstm, c_feat)
-    def forward(self, z_seq):
-        B, C, Lp = z_seq.shape
-        x = z_seq.transpose(1, 2)               # [B, L', C]
-        _, (h, c) = self.enc(x)
-        dec_in = torch.zeros(B, Lp, h.shape[-1], device=z_seq.device, dtype=z_seq.dtype)
-        y, _ = self.dec(dec_in, (h, c))
-        z_rec = self.proj(y)
-        return z_rec.transpose(1, 2)            # [B, C, L']
+def _coerce_numeric_df(df: pd.DataFrame) -> pd.DataFrame:
+    return df.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
 
-class Projector(nn.Module):
-    def __init__(self, in_dim, proj_dim=128, hidden=256):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Conv1d(in_dim, hidden, kernel_size=1, bias=False),
-            nn.BatchNorm1d(hidden),
-            nn.ReLU(inplace=True),
-            nn.Conv1d(hidden, proj_dim, kernel_size=1, bias=True),
-        )
-    def forward(self, z):
-        q_seq = self.net(z)           # [B, P, L']
-        q = q_seq.mean(dim=-1)        # [B, P]
-        return nn.functional.normalize(q, dim=1)
+def standardize_nanaware(x: np.ndarray):
+    m = np.nanmean(x, axis=0)
+    s = np.nanstd(x, axis=0)
+    s[s == 0] = 1.0
+    z = (x - m) / s
+    z = np.nan_to_num(z, nan=0.0, posinf=0.0, neginf=0.0)
+    return z
 
-class RoCANet(nn.Module):
-    def __init__(self, in_dim, num_tcn_blocks=3, tcn_hidden=64, proj_dim=128, proj_hidden=256,
-                 lstm_hidden=128, lstm_layers=3):
-        super().__init__()
-        self.encoder = TCNEncoder(in_dim, hidden=tcn_hidden, num_blocks=num_tcn_blocks)
-        self.seq2seq = Seq2SeqLSTM(c_feat=tcn_hidden, hidden_lstm=lstm_hidden, num_layers=lstm_layers)
-        self.projector = Projector(in_dim=tcn_hidden, proj_dim=proj_dim, hidden=proj_hidden)
-    def forward(self, x):
-        z = self.encoder(x)           # [B, C, L']
-        z_rec = self.seq2seq(z)       # [B, C, L']
-        q = self.projector(z)         # [B, P]
-        q_rec = self.projector(z_rec) # [B, P]
-        return q, q_rec, z, z_rec
+def make_windows(x: np.ndarray, window: int, stride: int):
+    T, F = x.shape
+    if T < window:
+        return np.zeros((0, window, F), dtype=np.float32), np.zeros((0,), dtype=int)
+    starts = np.arange(0, T - window + 1, stride, dtype=int)
+    W = np.stack([x[i:i+window] for i in starts], axis=0).astype(np.float32)
+    return W, starts
 
-# ---------- helpers ----------
 def cosine_sim(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    a = nn.functional.normalize(a, dim=1)
-    b = nn.functional.normalize(b, dim=1)
-    return (a * b).sum(dim=1)  # [B]
+    return F.cosine_similarity(a, b, dim=-1)
 
-@torch.no_grad()
-def batch_center(q: torch.Tensor, qp: torch.Tensor) -> torch.Tensor:
-    c = (q + qp).mean(dim=0, keepdim=True)
-    return nn.functional.normalize(c, dim=1)    # [1, P]
+# -----------------------
+# Model — must mirror train_roca.py
+# -----------------------
 
-def make_windows(x: np.ndarray, L: int, delta: int):
-    T = x.shape[0]
-    starts = np.arange(0, max(1, T - L + 1), delta, dtype=int)
-    xs = [x[s:s+L] for s in starts if s+L <= T]
-    return np.stack(xs, axis=0), starts  # [N, L, D], [N]
+class TCNBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, k=5, d=1):
+        super().__init__()
+        pad = (k - 1) * d
+        self.net = nn.Sequential(
+            nn.Conv1d(in_ch, out_ch, k, padding=pad, dilation=d),
+            nn.BatchNorm1d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.MaxPool1d(2)
+        )
+    def forward(self, x):  # (B,Cin,W)
+        return self.net(x)
 
-def load_model(ckpt_path, device):
-    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-    cfg = ckpt["config"]
-    in_dim = ckpt["in_dim"]
+class Encoder(nn.Module):
+    def __init__(self, feat_dim: int, hid: int = 64, proj_dim: int = 64):
+        super().__init__()
+        self.tcn = nn.Sequential(
+            TCNBlock(feat_dim, 64, k=5, d=1),
+            TCNBlock(64, 128, k=5, d=2),
+        )
+        self.lstm = nn.LSTM(input_size=128, hidden_size=hid, num_layers=2, batch_first=True, bidirectional=False)
+        self.proj = nn.Sequential(
+            nn.Linear(hid, 128),
+            nn.ReLU(inplace=True),
+            nn.Linear(128, proj_dim)
+        )
 
-    
+    def forward(self, x):  # x: (B, W, F)
+        x = x.transpose(1, 2)            # (B,F,W)
+        h = self.tcn(x)                  # (B, C, W')
+        h = h.transpose(1, 2)            # (B, W', C)
+        _, (hn, _) = self.lstm(h)        # hn: (layers, B, hid)
+        z = hn[-1]                       # (B, hid)
+        q = F.normalize(self.proj(z), dim=-1)  # (B, D)
+        return q
 
-    net = RoCANet(
-        in_dim=in_dim,
-        num_tcn_blocks=cfg["tcn_blocks"],
-        tcn_hidden=cfg["tcn_hidden"],
-        proj_dim=cfg["proj_dim"],
-        proj_hidden=cfg["proj_hidden"],
-        lstm_hidden=cfg["lstm_hidden"],
-        lstm_layers=cfg["lstm_layers"],
+# -----------------------
+# Inference
+# -----------------------
+
+def build_encoder_from_ckpt(ckpt, device):
+    arch = ckpt["arch"]
+    enc = Encoder(
+        feat_dim=arch["feat_dim"],
+        hid=arch["hid"],
+        proj_dim=arch["proj_dim"],
     ).to(device)
-    net.load_state_dict(ckpt["state_dict"])
-    net.eval()
-    mean_t = ckpt["standardize_mean"]
-    std_t  = ckpt["standardize_std"]
-    stats = {
-        "mean": mean_t.detach().cpu().numpy(),
-        "std":  std_t.detach().cpu().numpy(),
-    }
+    enc.load_state_dict(ckpt["state_dict"])
+    enc.eval()
+    return enc
 
-    meta = {"window": ckpt["window"], "stride": ckpt["stride"], "in_dim": in_dim}
-
-    # recalc center for 1 feature tests
-    Ce_train = ckpt.get("Ce_train", None)
-    if Ce_train is None:
-        raise RuntimeError("Checkpoint missing Ce_train. Re-train/save with Ce_train or fall back is unsafe.")
-    Ce_train = Ce_train.to(device)
-    return net, stats, meta, Ce_train, ckpt
-
-def standardize(x, mean, std):
-    return (x - mean) / (std + 1e-8)
+def jitter_scale(t: torch.Tensor, jitter_std: float, scale_std: float) -> torch.Tensor:
+    # t: (B, W, F). Apply small noise & per-feature scale like training.
+    out = t
+    if jitter_std and jitter_std > 0:
+        out = out + torch.randn_like(out) * jitter_std
+    if scale_std and scale_std > 0:
+        # per-feature scale shared over time within a window
+        B, W, F = out.shape
+        scale = 1.0 + torch.randn((B, 1, F), device=out.device, dtype=out.dtype) * scale_std
+        out = out * scale
+    return out
 
 def main():
-    ap = argparse.ArgumentParser(description="Score CSV with trained RoCA model")
-    ap.add_argument("--csv", required=True, help="Path to test CSV (rows=time, columns=features)")
+    ap = argparse.ArgumentParser("Score CSV with RoCA (trainer-compatible)")
+    ap.add_argument("--csv", required=True, help="Test CSV (rows=time, cols=features)")
     ap.add_argument("--model", required=True, help="Path to trained model .pt")
-    ap.add_argument("--cols", default=None, help="Comma-separated subset of columns to use (must match training order)")
-    ap.add_argument("--window", type=int, default=None, help="Override window length (defaults to training)")
+    ap.add_argument("--cols", default=None, help="Comma-separated subset of columns (must match training order)")
+    ap.add_argument("--window", type=int, default=None, help="Override window (defaults to training)")
     ap.add_argument("--stride", type=int, default=None, help="Override stride (defaults to training)")
-    ap.add_argument("--batch_size", type=int, default=256)
-    ap.add_argument("--threshold", type=float, default=None, help="Fixed threshold; if set, skips z-score rule")
-    ap.add_argument("--z_k", type=float, default=3.0, help="Label 1 if score > mean + k*std (used when --threshold is not set)")
+    ap.add_argument("--batch_size", type=int, default=512)
+    ap.add_argument("--threshold", type=float, default=None, help="Use fixed threshold (otherwise use ckpt τ; else mean+3σ)")
+    ap.add_argument("--z_k", type=float, default=3.0, help="If no τ in ckpt and no --threshold: μ + k·σ")
+    ap.add_argument("--no_aug", action="store_true", help="Disable augmentations; score each window once")
     ap.add_argument("--out_csv", default="roca_scores.csv")
     ap.add_argument("--cpu", action="store_true")
     args = ap.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
-    model, stats, meta, Ce_train, ckpt = load_model(args.model, device)
+    device = torch.device("cpu" if args.cpu or not torch.cuda.is_available() else "cuda")
+    ckpt = torch.load(args.model, map_location=device, weights_only=False)
 
+    # Rebuild encoder to match training
+    encoder = build_encoder_from_ckpt(ckpt, device)
+    Ce = ckpt["Ce"].to(device)  # [1, D], already normalized
+    tau_ckpt = ckpt.get("tau", None)
 
+    # Pull training hyperparams that affect inference
+    W = args.window if args.window is not None else ckpt.get("window", 128)
+    S = args.stride if args.stride is not None else ckpt.get("stride", 16)
+    jitter_std = 0.0 if args.no_aug else float(ckpt.get("jitter_std", 0.0))
+    scale_std  = 0.0 if args.no_aug else float(ckpt.get("scale_std", 0.0))
+
+    # Load and sanitize CSV
     df = pd.read_csv(args.csv)
-    df = df.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
-
-    # Optional: print a quick health report
-    rows_with_nan = int(df.isna().any(axis=1).sum())
-    if rows_with_nan > 0:
-        print(f"[WARN] Test CSV has {rows_with_nan} rows with NaN. "
-            f"Dropping them to avoid NaN scores.")
+    df = _coerce_numeric_df(df)
+    n_nan_rows = int(df.isna().any(axis=1).sum())
+    if n_nan_rows > 0:
+        print(f"[WARN] Test CSV has {n_nan_rows} rows with NaN — dropping those rows.")
         df = df.dropna(axis=0)
 
     if args.cols:
         df = df[args.cols.split(",")]
-    X = df.values.astype(np.float32)
 
-    # Check feature dimensionality
-    if X.shape[1] != meta["in_dim"]:
-        raise ValueError(f"Feature dimension mismatch: test has D={X.shape[1]}, model expects D={meta['in_dim']}.")
+    X = df.values.astype(np.float64)
+    # Check feature dim
+    inF = X.shape[1]
+    if inF != ckpt["arch"]["feat_dim"]:
+        raise ValueError(f"Feature mismatch: CSV has {inF}, model expects {ckpt['arch']['feat_dim']}.")
 
-    # Standardize using training stats
-    X = standardize(X, stats["mean"], stats["std"])
+    # Standardize per file (matches training’s per-capture z-score)
+    Xz = standardize_nanaware(X)
 
-    # Windowing
-    W = args.window if args.window is not None else meta["window"]
-    S = args.stride if args.stride is not None else meta["stride"]
-    win, starts = make_windows(X, W, S)         # [N, L, D], [N]
-    if win.size == 0:
-        raise ValueError("No windows produced; try smaller --window or ensure CSV has enough rows.")
+    # Windowing (per file, no cross-boundary)
+    Wn, starts = make_windows(Xz, W, S)  # (N, W, F)
+    if Wn.shape[0] == 0:
+        raise ValueError("No windows produced. Reduce --window or ensure CSV has enough rows.")
+    N = Wn.shape[0]
 
-    # To torch: [N, D, L]
-    win_t = torch.from_numpy(win.transpose(0, 2, 1)).to(device)
+    # Torch tensors
+    # Encoder expects (B, W, F)
+    Xw = torch.from_numpy(Wn).float().to(device)
 
     scores = []
+    encoder.eval()
     with torch.no_grad():
-        # mini-batch to avoid OOM
-        for i in range(0, win_t.shape[0], args.batch_size):
-            xb = win_t[i:i+args.batch_size]              # [B, D, L]
-            q, qp, _, _ = model(xb)                      # [B, P]
-            s = 2.0 - cosine_sim(q, Ce_train.expand_as(q)) - cosine_sim(qp, Ce_train.expand_as(qp))            
+        for i in range(0, N, args.batch_size):
+            xb = Xw[i:i+args.batch_size]  # (B,W,F)
+
+            if args.no_aug:
+                q1 = encoder(xb)                 # (B,D)
+                q2 = q1                          # identical view
+            else:
+                v1 = jitter_scale(xb, jitter_std, scale_std)
+                v2 = jitter_scale(xb, jitter_std, scale_std)
+                q1 = encoder(v1)
+                q2 = encoder(v2)
+
+            s = 2.0 - cosine_sim(q1, Ce.expand_as(q1)) - cosine_sim(q2, Ce.expand_as(q2))
             scores.append(s.detach().cpu().numpy())
-    scores = np.concatenate(scores, axis=0)              # [N]
 
-    # Thresholding logic
+    scores = np.concatenate(scores, axis=0)  # [N]
+
+    # Threshold selection
     if args.threshold is not None:
-        # User provided threshold on CLI
         thr = float(args.threshold)
-    elif "tau" in ckpt and ckpt["tau"] is not None:
-        # Use training-calibrated threshold if available in checkpoint
-        thr = float(ckpt["tau"])
+        thr_src = "cli"
+    elif tau_ckpt is not None:
+        thr = float(tau_ckpt)
+        thr_src = "checkpoint"
     else:
-        # Fallback: compute mean+z*std from test scores
-        mu, sd = float(scores.mean()), float(scores.std() + 1e-12)
+        mu, sd = float(scores.mean()), float(scores.std() if scores.std() > 1e-12 else 1e-12)
         thr = mu + args.z_k * sd
-
+        thr_src = f"dynamic μ+{args.z_k}σ"
 
     labels = (scores > thr).astype(np.int32)
-
-    # Align each window's score to its END index (end = start + W - 1)
     ends = starts + W - 1
+
     out = pd.DataFrame({
         "window_start_idx": starts,
         "window_end_idx": ends,
@@ -203,13 +200,12 @@ def main():
         "label": labels
     })
 
-    # Optional: if you want a per-row table the same length as input,
-    # you could propagate each window score to its end index.
-    # Here we only emit one row per window for clarity and no double-counting.
-
     os.makedirs(os.path.dirname(args.out_csv) or ".", exist_ok=True)
     out.to_csv(args.out_csv, index=False)
-    print(f"Wrote: {args.out_csv}\nThreshold used: {thr:.6f}\nWindows: {len(scores)}  (window={W}, stride={S})")
+    print(f"Wrote: {args.out_csv}")
+    print(f"Threshold used ({thr_src}): {thr:.6f}")
+    print(f"Windows: {len(scores)}  (window={W}, stride={S})")
+    print(f"Augmentations: {'OFF' if args.no_aug else f'jitter_std={jitter_std}, scale_std={scale_std}'}")
 
 if __name__ == "__main__":
     main()
